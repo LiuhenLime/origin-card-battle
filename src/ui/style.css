@@ -1,0 +1,181 @@
+:root {
+  color-scheme: dark;
+  --bg: #14171f;
+  --panel: #1d2230;
+  --line: #2c3448;
+  --gold: #f0c96a;
+  --blue: #6aa9f0;
+  --red: #e07070;
+  --green: #7fd08a;
+}
+
+* { box-sizing: border-box; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: #dfe4ee;
+  font-family: "Segoe UI", "Microsoft YaHei", system-ui, sans-serif;
+  min-height: 100vh;
+}
+
+.layout {
+  display: grid;
+  grid-template-columns: 1fr 280px;
+  gap: 12px;
+  padding: 12px;
+  max-width: 1200px;
+  margin: 0 auto;
+}
+
+.arena { display: flex; flex-direction: column; gap: 10px; }
+
+.hero-panel {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 16px;
+  font-size: 15px;
+}
+.hero-panel .hp { color: var(--red); font-weight: 700; }
+.hero-panel .mana { color: var(--blue); font-weight: 700; }
+.hero-panel .meta { color: #9aa3b5; }
+.hero-panel.targetable {
+  border-color: var(--red);
+  box-shadow: 0 0 8px rgba(224, 112, 112, 0.55);
+  cursor: crosshair;
+}
+
+#end-turn {
+  margin-left: auto;
+  padding: 8px 18px;
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gold);
+  font-size: 14px;
+  cursor: pointer;
+}
+#end-turn:hover:not(:disabled) { background: rgba(240, 201, 106, 0.12); }
+#end-turn:disabled { opacity: 0.35; cursor: default; }
+
+.board-row {
+  min-height: 96px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  justify-content: center;
+  background: rgba(255, 255, 255, 0.02);
+  border-radius: 10px;
+  padding: 8px;
+}
+
+.creature {
+  width: 96px;
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 8px;
+  text-align: center;
+  user-select: none;
+}
+.creature .creature-name { font-size: 12px; margin-bottom: 6px; min-height: 16px; }
+.creature-stats b { font-size: 15px; }
+.creature-stats b:first-child { color: var(--green); }
+.creature-stats b:last-child { color: var(--red); }
+.creature.ready { border-color: var(--green); cursor: pointer; }
+.creature.selected { border-color: var(--gold); box-shadow: 0 0 8px rgba(240, 201, 106, 0.5); cursor: pointer; }
+.creature.targetable {
+  border-color: var(--red);
+  box-shadow: 0 0 8px rgba(224, 112, 112, 0.55);
+  cursor: crosshair;
+}
+
+.hand-row {
+  min-height: 130px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  justify-content: center;
+  align-items: flex-end;
+  padding: 6px 0;
+}
+
+.card {
+  position: relative;
+  width: 108px;
+  height: 128px;
+  background: linear-gradient(170deg, #262d40, #1b2130);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 8px 26px;
+  cursor: pointer;
+}
+.card:hover { border-color: var(--blue); }
+.card.unplayable { opacity: 0.45; cursor: default; }
+.card .cost {
+  position: absolute;
+  top: -8px;
+  left: -8px;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  background: var(--blue);
+  color: #0d1117;
+  font-weight: 800;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.card-name { font-size: 13px; font-weight: 700; }
+.card-type { font-size: 10px; color: #9aa3b5; margin: 2px 0 4px; }
+.card-text { font-size: 10px; color: #c3c9d6; line-height: 1.35; }
+.card .stats { position: absolute; bottom: 6px; left: 0; right: 0; text-align: center; }
+.card .stats b:first-child { color: var(--green); }
+.card .stats b:last-child { color: var(--red); }
+
+.hint { text-align: center; color: #9aa3b5; font-size: 13px; padding: 4px; }
+
+.log {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  padding: 10px 12px;
+  font-size: 12px;
+  max-height: 88vh;
+  overflow-y: auto;
+}
+.log h3 { margin: 0 0 8px; font-size: 14px; color: var(--gold); }
+.log-line { padding: 3px 0; border-bottom: 1px dashed rgba(255, 255, 255, 0.05); }
+
+.overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.65);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+}
+.overlay-box {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 34px 60px;
+  text-align: center;
+}
+.overlay-title { font-size: 26px; margin-bottom: 20px; }
+#restart {
+  padding: 10px 26px;
+  border: 1px solid var(--gold);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--gold);
+  font-size: 15px;
+  cursor: pointer;
+}
+#restart:hover { background: rgba(240, 201, 106, 0.12); }
