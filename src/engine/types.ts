@@ -54,9 +54,10 @@ export interface CharDef {
   atk: number; // 攻击力（普通攻击的伤害/治疗量）
   spMax: number; // 技能点上限
   domain: Domain;
-  /** 领域攻防值 */
-  atkVal: number; // 进攻值（攻方生效）
-  defVal: number; // 防守值（守方生效）
+  /** 阵营：防守方牌仅显示防守值，进攻方牌仅显示进攻值 */
+  faction: "defense" | "attack";
+  /** 领域数值：防守方牌为防守值，进攻方牌为进攻值 */
+  laneVal: number;
   /** 大招：技能点满后可释放，释放后清空 */
   burst: BurstDef;
   /** 大招附加：释放后治疗自身（影刺客） */
@@ -71,16 +72,18 @@ export interface CharDef {
 
 export type PassiveId =
   | "none"
-  | "tough_skin" // 小火龙：受到的普通攻击伤害 -1
-  | "pack_tactics" // 哥布林：己方场上哥布林>1 时攻击 +2
-  | "archmage" // 魔法师：普通攻击为真实伤害
-  | "healer" // 治愈师：普通攻击改为治疗我方，初始技能点 2
-  | "stone_wing" // 石像鬼：不受火山伤害
-  | "bloodthirst" // 兽人战士：击杀敌人后回复 3 点生命
-  | "bones" // 骷髅弓手：每回合结束回复 1 点生命
-  | "spikes" // 双足飞龙：受到的技能伤害 -1
-  | "shell" // 岩甲龟：受到的非真实伤害 -2
-  | "ambush"; // 影刺客：攻击生命值低于自己的敌人时伤害 +2
+  | "tough_skin" // 受到的普通攻击伤害 -1
+  | "pack_tactics" // 己方场上同名角色 >1 时攻击 +2
+  | "archmage" // 普通攻击造成真实伤害
+  | "healer" // 普通攻击改为治疗我方，初始技能点 2
+  | "stone_wing" // 不受火山伤害
+  | "bloodthirst" // 击杀敌人后回复 3 点生命
+  | "bones" // 每回合结束回复 1 点生命
+  | "spikes" // 受到的技能伤害 -1
+  | "shell" // 受到的非真实伤害 -2
+  | "ambush" // 攻击生命值低于自己的敌人时伤害 +2
+  | "execute" // 攻击生命值过半的敌人时伤害 +2
+  | "wraith"; // 受到的非真实伤害 -1
 
 export type BurstTarget = "all_enemies" | "all_allies" | "one_enemy" | "self" | "none";
 
@@ -142,8 +145,8 @@ export interface FieldChar {
   atk: number; // 当前攻击力（含增益）
   sp: number;
   spMax: number;
-  atkVal: number; // 当前进攻值（含增益）
-  defVal: number; // 当前防守值（含增益）
+  /** 领域数值：防守方为防守值，进攻方为进攻值 */
+  laneVal: number;
   domain: Domain;
   /** 守方地面单位站上高地后转提供天空防守值 */
   elevated: boolean;

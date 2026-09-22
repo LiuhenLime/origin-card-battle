@@ -11,15 +11,15 @@ export function findChar(s: GameState, side: Side, uid: number): FieldChar | und
   return s.players[side].field.find((c) => c.uid === uid);
 }
 
-/** 某方场上哥布林数量（结对被动用） */
-function goblinCount(s: GameState, side: Side, goblinId: string): number {
-  return s.players[side].field.filter((c) => c.defId === goblinId).length;
+/** 某方场上同名角色数量（结对被动用） */
+function sameNameCount(s: GameState, c: FieldChar): number {
+  return s.players[c.owner].field.filter((x) => x.defId === c.defId).length;
 }
 
 /** 角色的有效攻击力（含结对被动） */
-export function effectiveAtk(s: GameState, c: FieldChar, goblinId: string): number {
+export function effectiveAtk(s: GameState, c: FieldChar): number {
   let atk = c.atk;
-  if (c.passive === "pack_tactics" && goblinCount(s, c.owner, goblinId) > 1) atk += 2;
+  if (c.passive === "pack_tactics" && sameNameCount(s, c) > 1) atk += 2;
   return atk;
 }
 
@@ -29,10 +29,10 @@ export function laneTotals(s: GameState, side: Side): LaneTotals {
   const totals: LaneTotals = { ground: 0, sky: 0 };
   for (const c of p.field) {
     if (p.role === "attack") {
-      if (c.domain === "ground") totals.ground += c.atkVal;
-      else totals.sky += c.atkVal;
-    } else if (c.domain === "sky" || c.elevated) totals.sky += c.defVal;
-    else totals.ground += c.defVal;
+      if (c.domain === "ground") totals.ground += c.laneVal;
+      else totals.sky += c.laneVal;
+    } else if (c.domain === "sky" || c.elevated) totals.sky += c.laneVal;
+    else totals.ground += c.laneVal;
   }
   return totals;
 }
@@ -52,6 +52,7 @@ export function damageChar(
     if (target.passive === "tough_skin" && opts.source === "attack") dmg -= 1;
     if (target.passive === "shell") dmg -= 2;
     if (target.passive === "spikes" && opts.source === "skill") dmg -= 1;
+    if (target.passive === "wraith") dmg -= 1;
   }
   dmg = Math.max(0, dmg);
   if (dmg === 0) {
@@ -109,14 +110,9 @@ export function gainSp(s: GameState, c: FieldChar, amount = 1): void {
   s.events.push({ t: "sp", side: c.owner, uid: c.uid, amount: real });
 }
 
-/** 普通攻击结算：法师被动真实伤害、治愈师强制治疗、刺客偷袭加成 */
-export function resolveNormalAttack(
-  s: GameState,
-  attacker: FieldChar,
-  target: FieldChar,
-  goblinId: string,
-): void {
-  const atk = effectiveAtk(s, attacker, goblinId);
+/** 普通攻击结算：法师/女巫真实伤害、治愈师强制治疗、刺客/双头犬加成 */
+export function resolveNormalAttack(s: GameState, attacker: FieldChar, target: FieldChar): void {
+  const atk = effectiveAtk(s, attacker);
   if (attacker.passive === "healer") {
     s.events.push({ t: "attack", side: attacker.owner, uid: attacker.uid, targetUid: target.uid, heal: true, pure: false, amount: atk });
     healChar(s, target, atk);
@@ -128,6 +124,10 @@ export function resolveNormalAttack(
   if (attacker.passive === "ambush" && target.hp < attacker.hp) {
     dmg += 2;
     s.log.push(`🗡 「${attacker.name}」触发偷袭，伤害 +2`);
+  }
+  if (attacker.passive === "execute" && target.hp <= target.maxHp / 2) {
+    dmg += 2;
+    s.log.push(`🗡 「${attacker.name}」触发斩杀，伤害 +2`);
   }
   s.events.push({ t: "attack", side: attacker.owner, uid: attacker.uid, targetUid: target.uid, heal: false, pure, amount: dmg });
   damageChar(s, target, dmg, { pure, source: "attack" }, attacker);

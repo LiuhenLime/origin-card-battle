@@ -120,7 +120,6 @@ export function useNormalAttack(
   side: Side,
   uid: number,
   targetRef: CharRef,
-  goblinId: string,
 ): string | null {
   const err = actorError(s, side);
   if (err) return err;
@@ -137,7 +136,7 @@ export function useNormalAttack(
   }
 
   attacker.skillUsed = true;
-  resolveNormalAttack(s, attacker, target, goblinId);
+  resolveNormalAttack(s, attacker, target);
   flipActor(s);
   return null;
 }
@@ -149,7 +148,6 @@ export function useBurst(
   side: Side,
   uid: number,
   targetRef: CharRef | undefined,
-  goblinId: string,
 ): string | null {
   const err = actorError(s, side);
   if (err) return err;
@@ -203,8 +201,8 @@ export function useBurst(
         s.log.push(`💪 「${c.name}」攻击力 +${burst.atkBuff}（${c.atk}）`);
       }
       if (burst.defBuff) {
-        c.defVal += burst.defBuff;
-        s.log.push(`🛡 「${c.name}」防守值 +${burst.defBuff}（${c.defVal}）`);
+        c.laneVal += burst.defBuff;
+        s.log.push(`🛡 「${c.name}」防守值 +${burst.defBuff}（${c.laneVal}）`);
       }
       if (burst.value) {
         s.players[side].cost += burst.value;

@@ -178,6 +178,7 @@ button { font-family: inherit; }
 .chip-row { display: flex; gap: 6px; font-size: 11px; align-items: baseline; }
 .chip-atk { color: var(--ground); font-weight: 700; }
 .chip-def { color: var(--sky); }
+.chip-atklane { color: var(--red); font-weight: 700; }
 .chip-orbs { margin-left: auto; color: var(--gold); letter-spacing: -1px; font-size: 10px; }
 
 .chip.targetable { border-color: var(--red); box-shadow: 0 0 10px rgb(224 112 112 / 45%); cursor: crosshair; animation: pulse 1.1s infinite; }

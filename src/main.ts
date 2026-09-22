@@ -23,7 +23,6 @@ const CHARS = rawChars as unknown as CharDef[];
 const ITEMS = rawItems as unknown as ItemDef[];
 const charDefs: Record<string, CharDef> = Object.fromEntries(CHARS.map((c) => [c.id, c]));
 const itemDefs: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
-const GOBLIN_ID = "goblin";
 
 type Screen = "setup" | "draft" | "battle";
 
@@ -336,7 +335,7 @@ app.addEventListener("click", (ev) => {
         paint();
         return;
       }
-      afterAction(useBurst(state, charDefs, viewer, uid, undefined, GOBLIN_ID));
+      afterAction(useBurst(state, charDefs, viewer, uid, undefined));
       return;
     }
     if (act === "undeploy") {
@@ -362,11 +361,11 @@ app.addEventListener("click", (ev) => {
       return;
     }
     if (ui.mode.kind === "attack") {
-      afterAction(useNormalAttack(state, viewer, ui.mode.uid, { side, uid }, GOBLIN_ID));
+      afterAction(useNormalAttack(state, viewer, ui.mode.uid, { side, uid }));
       return;
     }
     if (ui.mode.kind === "burst") {
-      afterAction(useBurst(state, charDefs, viewer, ui.mode.uid, { side, uid }, GOBLIN_ID));
+      afterAction(useBurst(state, charDefs, viewer, ui.mode.uid, { side, uid }));
       return;
     }
     if (ui.mode.kind === "item") {
@@ -463,7 +462,9 @@ app.addEventListener("click", (ev) => {
 
 function startBattle(): void {
   const names: [string, string] = ["你（防守方）", "AI（进攻方）"];
-  const aiDeck = shuffle(CHARS.map((c) => c.id)).slice(0, 8);
+  // AI 从进攻方专属卡池随机取 8 张角色
+  const attackIds = CHARS.filter((c) => c.faction === "attack").map((c) => c.id);
+  const aiDeck = shuffle(attackIds).slice(0, 8);
   state = createGame(
     {
       difficulty: setup.difficulty,

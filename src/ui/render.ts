@@ -78,6 +78,7 @@ export function renderDraft(
   charDefs: Record<string, CharDef>,
 ): string {
   const cards = Object.values(charDefs)
+    .filter((d) => d.faction === "defense") // 单机：玩家只能选择防守方角色牌
     .map((d) => {
       const picked = ds.selected.includes(d.id);
       return `
@@ -89,7 +90,7 @@ export function renderDraft(
           <span class="tag">💰${d.cost}</span>
           <span class="tag">❤${d.hp}</span>
           <span class="tag">⚔${d.atk}</span>
-          <span class="tag">${d.domain === "sky" ? "天" : "地"}${d.atkVal}/${d.defVal}</span>
+          <span class="tag">${d.domain === "sky" ? "天防" : "地防"}${d.laneVal}</span>
         </div>
         <div class="draft-passive">✦ ${d.passiveText}</div>
       </div>`;
@@ -119,6 +120,7 @@ function chipHtml(
   c: FieldChar,
   ui: UiState,
   extraCls: string,
+  ownerRole: "attack" | "defense",
 ): string {
   const fx = ui.fx;
   // 本回合还能行动的角色绿底；已用过技能（无法行动）红底
@@ -138,13 +140,17 @@ function chipHtml(
   const hpPct = Math.max(0, Math.round((c.hp / c.maxHp) * 100));
   const orbs = Array.from({ length: c.spMax }, (_, i) => (i < c.sp ? "●" : "○")).join("");
   const laneTag = c.elevated || c.domain === "sky" ? "天" : "地";
+  const isAttacker = ownerRole === "attack";
+  const laneHtml = isAttacker
+    ? `<span class="chip-atklane">${laneTag}攻${c.laneVal}</span>`
+    : `<span class="chip-def">${laneTag}防${c.laneVal}</span>`;
   return `
   <div class="${cls}" data-uid="${c.uid}" data-side="${c.owner}" data-domain="${c.domain}">
     <div class="chip-art">${charThumb(c.defId, c.name)}</div>
     <div class="chip-body">
       <div class="chip-name">${c.name}${c.elevated ? ' <i class="badge elev">高地</i>' : ""}${c.equipment ? ' <i class="badge eq">🛡</i>' : ""}</div>
       <div class="chip-hp"><i style="width:${hpPct}%"></i><span>${Math.max(0, c.hp)}/${c.maxHp}</span></div>
-      <div class="chip-row"><span class="chip-atk">⚔${c.atk}</span><span class="chip-def">${laneTag}${c.defVal}</span><span class="chip-orbs">${orbs}</span></div>
+      <div class="chip-row"><span class="chip-atk">⚔${c.atk}</span>${laneHtml}<span class="chip-orbs">${orbs}</span></div>
     </div>
   </div>`;
 }
@@ -204,7 +210,7 @@ function cellHtml(
         (mode.kind === "item" && (itemNeed === "own_char" ? c.owner === ui.viewer : c.owner !== ui.viewer)) ||
         (mode.kind === "movePick" && c.owner === ui.viewer);
       const cls = [selected ? "selected" : "", targetable ? "targetable" : ""].filter(Boolean).join(" ");
-      return chipHtml(c, ui, cls);
+      return chipHtml(c, ui, cls, s.players[side].role);
     }).join("")}</div>
   </div>`;
 }
@@ -236,7 +242,7 @@ function handHtml(s: GameState, ui: UiState, defs: Record<string, CharDef>, item
         <div class="hand-cost">💰${cost}</div>
         ${cooling ? `<div class="hand-cool">⏳冷却 ${h.cooldown}</div>` : ""}
         <div class="hand-name">${def.name}</div>
-        <div class="hand-stats"><span class="${def.domain}">${def.domain === "sky" ? "天空" : "地面"} ${def.atkVal}/${def.defVal}</span> ❤${def.hp} ⚔${def.atk} ⚡${def.spMax}</div>
+        <div class="hand-stats"><span class="${def.domain}">${def.domain === "sky" ? "天空" : "地面"}${def.faction === "attack" ? "攻" : "防"}${def.laneVal}</span> ❤${def.hp} ⚔${def.atk} ⚡${def.spMax}</div>
       </div>`;
     })
     .join("");
@@ -368,7 +374,7 @@ export function renderBattle(
           const lane = inspectChar.elevated ? "天空（高地转化）" : inspectChar.domain === "sky" ? "天空" : "地面";
           return `<h3>${inspectChar.name} <small>${def.title}</small></h3>
           <p>生命 ${inspectChar.hp}/${inspectChar.maxHp} · 攻击 ${inspectChar.atk} · 技能点 ${inspectChar.sp}/${inspectChar.spMax}</p>
-          <p>${lane}进攻 ${inspectChar.atkVal} / 防守 ${inspectChar.defVal}${inspectChar.elevated ? "（计入天空防守）" : ""}</p>
+          <p>${lane}${s.players[inspectChar.owner].role === "attack" ? "进攻值 " : "防守值 "}${inspectChar.laneVal}${inspectChar.elevated ? "（计入天空防守）" : ""}</p>
           <p>被动 ✦ ${inspectChar.passiveText}</p>
           <p>大招 🌟 ${def.burst.name}：${def.burst.text}</p>
           <p>${inspectChar.skillUsed ? "本回合已使用技能" : "本回合尚未使用技能"}${inspectChar.equipment ? " · 已装备 🛡 防御胸甲" : ""}</p>`;
@@ -434,8 +440,8 @@ export function helpContent(): string {
     <p>统计进攻方地面/天空进攻值与防守方地面/天空防守值。任一线<b>进攻 &gt; 防守</b>即被突破：扣除两线差值之和的总生命；两线都守住则无伤。</p>
     <h3>🗺 站位</h3>
     <p>每方 2×3 共 6 个区域，<b>每个区域只能放置一个角色</b>。防守方拥有 2 个高地（后排两角）与 4 个地面区域：天空角色可放任意区域；地面角色放地面区域提供地面防守，也可花<b>双倍部署费</b>上高地转为天空防守。进攻方无高地概念，部署永不翻倍。火山地形下双方后排中间为火山口（不可部署），其上/左/右区域的角色每回合结束受 6 点真实伤害。</p>
-    <h3>🧙 角色</h3>
-    <p>属性：部署费、生命、攻击、技能点上限、地面或天空的进攻/防守值。<br>技能一（普通攻击）：按攻击力伤害敌方角色（治愈师被动改为治疗我方），不耗技能点。<br>技能二（大招）：技能点满才能释放，释放后清空。<br>被动：每角色一个，自动生效。</p>
+    <h3>🧙 角色与阵营</h3>
+    <p>角色牌分阵营专属：<b>防守方角色牌</b>（玩家选 8 张）仅显示地面/天空<b>防守值</b>；<b>进攻方角色牌</b>（AI 随机 8 张）仅显示地面/天空<b>进攻值</b>。魔族军团已兵临城下！<br>共同属性：部署费、生命、攻击、技能点上限。<br>技能一（普通攻击）：按攻击力伤害敌方角色（治愈师被动改为治疗我方），不耗技能点。<br>技能二（大招）：技能点满才能释放，释放后清空。<br>被动：每角色一个，自动生效。</p>
     <h3>⚡ 技能点</h3>
     <p>每回合结束全场角色 +2；角色每攻击或治疗一次 +1。每回合每角色只能使用普攻或大招其一（刚上场的角色当回合也可用一次）。</p>
     <h3>☠ 死亡与冷却</h3>

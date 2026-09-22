@@ -64,8 +64,8 @@ function deployable(s: GameState, charDefs: Record<string, CharDef>) {
 }
 
 /** 部署候选按“所需领域价值”排序 */
-function deployValue(def: CharDef, role: "attack" | "defense", need: "ground" | "sky" | "any"): number {
-  const laneVal = role === "attack" ? def.atkVal : def.defVal;
+function deployValue(def: CharDef, need: "ground" | "sky" | "any"): number {
+  const laneVal = def.laneVal;
   if (need === "any") return laneVal + def.atk / 2;
   return def.domain === (need === "ground" ? "ground" : "sky") ? laneVal * 2 + def.atk / 2 : laneVal / 2;
 }
@@ -102,7 +102,7 @@ function evaluateItem(
     return null;
   }
   if (want("equip_armor")) {
-    const wall = [...me.field].filter((c) => c.hp > 0 && !c.equipment).sort((a, b) => b.defVal - a.defVal)[0];
+    const wall = [...me.field].filter((c) => c.hp > 0 && !c.equipment).sort((a, b) => b.laneVal - a.laneVal)[0];
     if (wall) return { kind: "item", handUid, target: { side: AI_SIDE, uid: wall.uid } };
     return null;
   }
@@ -140,7 +140,7 @@ export function aiNextAction(
   if (attacker && attacker.passive !== "healer") {
     const victims = [...foe.field]
       .filter((c) => c.hp > 0)
-      .sort((a, b) => b.defVal - a.defVal || b.atkVal - a.atkVal);
+      .sort((a, b) => b.laneVal - a.laneVal || b.atk - a.atk);
     const killable = victims.find((v) => v.hp <= attacker.atk);
     if (killable) return { kind: "attack", uid: attacker.uid, target: { side: foeSide, uid: killable.uid } };
   }
@@ -171,7 +171,7 @@ export function aiNextAction(
   if (attacker) {
     const victims = [...foe.field]
       .filter((c) => c.hp > 0)
-      .sort((a, b) => a.hp - b.hp || b.atkVal - a.atkVal);
+      .sort((a, b) => a.hp - b.hp || b.laneVal - a.laneVal);
     if (victims[0]) return { kind: "attack", uid: attacker.uid, target: { side: foeSide, uid: victims[0].uid } };
   }
 
@@ -199,7 +199,7 @@ export function aiNextAction(
   // 6. 补充进攻力量（受每回合部署预算限制），随后宣告结束
   if (aiDeploysUsed < AI_DEPLOY_BUDGET) {
     const options = deployable(s, charDefs).sort(
-      (a, b) => deployValue(b.def, "attack", "any") / b.cost - deployValue(a.def, "attack", "any") / a.cost,
+      (a, b) => deployValue(b.def, "any") / b.cost - deployValue(a.def, "any") / a.cost,
     );
     if (options[0]) {
       aiDeploysUsed += 1;
@@ -225,10 +225,10 @@ export function applyAiStep(
       undeployChar(s, AI_SIDE, step.uid);
       break;
     case "attack":
-      useNormalAttack(s, AI_SIDE, step.uid, step.target, GOBLIN_ID);
+      useNormalAttack(s, AI_SIDE, step.uid, step.target);
       break;
     case "burst":
-      useBurst(s, charDefs, AI_SIDE, step.uid, step.target, GOBLIN_ID);
+      useBurst(s, charDefs, AI_SIDE, step.uid, step.target);
       break;
     case "item":
       playItem(s, itemDefs, AI_SIDE, step.handUid, step.target, step.moveTo);

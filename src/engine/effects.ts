@@ -53,8 +53,8 @@ export function applyItemEffects(
       }
       case "def_buff": {
         if (!target) return "需要目标";
-        target.defVal += e.value;
-        s.log.push(`🛡 「${target.name}」防守值 +${e.value}（${target.defVal}）`);
+        target.laneVal += e.value;
+        s.log.push(`🛡 「${target.name}」防守值 +${e.value}（${target.laneVal}）`);
         break;
       }
       case "draw": {
