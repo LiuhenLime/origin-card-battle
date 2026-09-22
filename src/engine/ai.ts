@@ -3,15 +3,15 @@
 import type { CellPos, CharDef, CharRef, GameState, ItemDef, ItemEffect } from "./types";
 import { volcanoBlastCells } from "./types";
 import { findChar } from "./combat";
-import { deployChar, deployCostOf, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./actions";
+import { deployChar, deployCostOf, isCellOccupied, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./actions";
 
 const AI_SIDE = 1 as const;
 const GOBLIN_ID = "goblin";
 
 /** AI 每个行动回合最多使用的道具牌数（道具不换手，无上限会无限刷增益道具） */
 const AI_ITEM_BUDGET = 2;
-/** AI 每回合最多部署次数（超过则宣告结束，避免囤兵不止、回合无法结算） */
-const AI_DEPLOY_BUDGET = 2;
+/** AI 每回合最多部署次数（每区限一角色后自然受格数与费用约束） */
+const AI_DEPLOY_BUDGET = 3;
 let aiItemsUsed = 0;
 let aiDeploysUsed = 0;
 let aiLastRoundSeen = 0;
@@ -31,8 +31,8 @@ function isBlasted(s: GameState, side: 0 | 1, pos: CellPos): boolean {
   return cells.some((b) => b.row === pos.row && b.col === pos.col);
 }
 
-/** 挑一个不容易吃火山伤害的空位（优先前排两侧，其次任意非火山口格） */
-function pickCell(s: GameState): CellPos {
+/** 挑一个可部署的空格：优先避开火山带，并依次铺开到不同区域 */
+function pickCell(s: GameState): CellPos | null {
   const safe: CellPos[] = [
     { row: 1, col: 0 },
     { row: 1, col: 2 },
@@ -43,9 +43,12 @@ function pickCell(s: GameState): CellPos {
     { row: 1, col: 1 },
   ];
   for (const pos of [...safe, ...rest]) {
-    if (!isBlasted(s, AI_SIDE, pos)) return pos;
+    if (!isBlasted(s, AI_SIDE, pos) && !isCellOccupied(s, AI_SIDE, pos)) return pos;
   }
-  return { row: 1, col: 0 };
+  for (const pos of [...safe, ...rest]) {
+    if (!isCellOccupied(s, AI_SIDE, pos)) return pos; // 全是火山带也只好硬上
+  }
+  return null; // 没有空格了
 }
 
 /** 可部署的手牌角色（冷却完毕且付得起） */
@@ -198,12 +201,15 @@ export function aiNextAction(
 
   // 6. 补充进攻力量（受每回合部署预算限制），随后宣告结束
   if (aiDeploysUsed < AI_DEPLOY_BUDGET) {
-    const options = deployable(s, charDefs).sort(
-      (a, b) => deployValue(b.def, "any") / b.cost - deployValue(a.def, "any") / a.cost,
-    );
-    if (options[0]) {
+    const pos = pickCell(s);
+    const options = pos
+      ? deployable(s, charDefs).sort(
+          (a, b) => deployValue(b.def, "any") / b.cost - deployValue(a.def, "any") / a.cost,
+        )
+      : [];
+    if (pos && options[0]) {
       aiDeploysUsed += 1;
-      return { kind: "deploy", handUid: options[0].uid, pos: pickCell(s) };
+      return { kind: "deploy", handUid: options[0].uid, pos };
     }
   }
 
