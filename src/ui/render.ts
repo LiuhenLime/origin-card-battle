@@ -1,147 +1,448 @@
-// 渲染层：把 GameState 映射为 HTML 字符串，并计算当前交互模式下的可点目标。
-import type { CardDef, GameState, TargetRef } from "../engine/types";
-import { legalTargets, needsTarget } from "../engine/effects";
+// 渲染层：把 GameState 与 UI 状态映射为 HTML。纯展示，不含规则；交互经 data-* 属性由 main.ts 路由。
+import type { CellPos, CharDef, FieldChar, GameState, ItemDef, Side } from "../engine/types";
+import { DIFFICULTY, volcanoBlastCells } from "../engine/types";
+import { laneTotals } from "../engine/combat";
+import { deployCostOf, isBlockedCell } from "../engine/actions";
+import { charArt, charThumb, itemArt } from "./art";
+
+// ---------- UI 状态 ----------
 
 export type UiMode =
   | { kind: "idle" }
-  | { kind: "targetPlay"; handUid: number }
-  | { kind: "selectAttacker"; uid: number };
+  | { kind: "charMenu"; uid: number }
+  | { kind: "deploy"; handUid: number }
+  | { kind: "attack"; uid: number }
+  | { kind: "burst"; uid: number }
+  | { kind: "item"; handUid: number }
+  | { kind: "movePick"; handUid: number; targetUid: number };
 
-export function refKey(r: TargetRef): string {
-  return r.kind === "hero" ? `hero:${r.side}` : `c:${r.uid}`;
+export interface FxState {
+  attackUid: number | null;
+  hitUids: Set<number>;
+  healUids: Set<number>;
+  spUids: Set<number>;
+  deployUid: number | null;
+  breach: boolean;
 }
 
-/** 当前模式下可被点击作为目标的对象（用于高亮与点击校验） */
-export function targetableRefs(
-  state: GameState,
-  mode: UiMode,
-  defs: Record<string, CardDef>,
-): Set<string> {
-  const keys = new Set<string>();
-  const add = (r: TargetRef) => keys.add(refKey(r));
-  if (mode.kind === "targetPlay") {
-    const hc = state.players[0].hand.find((h) => h.uid === mode.handUid);
-    const def = hc ? defs[hc.cardId] : undefined;
-    const effects = [...(def?.battlecry ?? []), ...(def?.effects ?? [])].filter(needsTarget);
-    for (const e of effects) legalTargets(state, 0, e).forEach(add);
-  } else if (mode.kind === "selectAttacker") {
-    const foe = state.players[1];
-    const taunts = foe.board.filter((c) => c.taunt);
-    // 有嘲讽则只能选嘲讽
-    const list = taunts.length > 0 ? taunts : foe.board;
-    list.forEach((c) => add({ kind: "creature", side: 1, uid: c.uid }));
-    if (taunts.length === 0) add({ kind: "hero", side: 1 });
-  }
-  return keys;
+export function emptyFx(): FxState {
+  return { attackUid: null, hitUids: new Set(), healUids: new Set(), spUids: new Set(), deployUid: null, breach: false };
 }
 
-function handCardHtml(uid: number, def: CardDef, playable: boolean): string {
-  const stats =
-    def.type === "creature" ? `<div class="stats"><b>${def.atk}</b>/<b>${def.hp}</b></div>` : "";
-  const typeLabel = def.type === "creature" ? "随从" : "法术";
+export interface UiState {
+  mode: UiMode;
+  fx: FxState;
+  viewer: Side;
+  logOpen: boolean;
+  inspectUid: number | null;
+}
+
+// ---------- 开局设置屏 ----------
+
+export interface SetupChoice {
+  mode: "ai-attack" | "ai-defense" | "duo";
+  difficulty: "normal" | "hard";
+  terrain: "plain" | "volcano";
+}
+
+export function renderSetup(sel: SetupChoice): string {
+  const opt = (value: string, cur: string, label: string) =>
+    `<button class="pill ${cur === value ? "on" : ""}" data-setup="${value}">${label}</button>`;
   return `
-    <div class="card ${playable ? "" : "unplayable"}" data-hand-uid="${uid}">
-      <div class="cost">${def.cost}</div>
-      <div class="card-name">${def.name}</div>
-      <div class="card-type">${typeLabel}${def.taunt ? " · 嘲讽" : ""}</div>
-      <div class="card-text">${def.text ?? ""}</div>
-      ${stats}
-    </div>`;
+  <div class="screen setup">
+    <h1>攻防对决</h1>
+    <p class="sub">进攻方摧毁防线 · 防守方固守回合</p>
+    <div class="setup-group">
+      <h3>对局模式</h3>
+      ${opt("ai-attack", sel.mode, "人机 · 我执进攻")}
+      ${opt("ai-defense", sel.mode, "人机 · 我执防守")}
+      ${opt("duo", sel.mode, "双人同屏")}
+    </div>
+    <div class="setup-group">
+      <h3>难度</h3>
+      ${opt("normal", sel.difficulty, "标准（总生命10 · 守10回合）")}
+      ${opt("hard", sel.difficulty, "艰难（总生命15 · 守15回合）")}
+    </div>
+    <div class="setup-group">
+      <h3>地形</h3>
+      ${opt("plain", sel.terrain, "平原")}
+      ${opt("volcano", sel.terrain, "火山（火山口周边每回合受 6 点真实伤害）")}
+    </div>
+    <button id="to-draft" class="primary">选择角色 →</button>
+    <button id="open-help-setup" class="ghost">玩法说明</button>
+  </div>`;
 }
 
-function creatureHtml(uid: number, c: GameState["players"][0]["board"][0], cls: string): string {
-  return `
-    <div class="creature ${cls}" data-creature-uid="${uid}" data-side="${c.owner}">
-      <div class="creature-name">${c.taunt ? "🛡 " : ""}${c.name}</div>
-      <div class="creature-stats"><b>${c.atk}</b>/<b>${c.hp}</b></div>
-    </div>`;
+// ---------- 选人屏 ----------
+
+export interface DraftState {
+  picks: [string[], string[]];
+  phase: 0 | 1;
+  selected: string[];
 }
 
-export function render(
-  state: GameState,
-  mode: UiMode,
-  defs: Record<string, CardDef>,
+export function renderDraft(
+  ds: DraftState,
+  setup: SetupChoice,
+  charDefs: Record<string, CharDef>,
 ): string {
-  const targets = targetableRefs(state, mode, defs);
-  const myTurn = state.active === 0 && state.winner === null;
-  const me = state.players[0];
-  const foe = state.players[1];
-
-  const foeBoard = foe.board
-    .map((c) => {
-      const key = refKey({ kind: "creature", side: 1, uid: c.uid });
-      const cls = targets.has(key) ? "targetable" : "";
-      return creatureHtml(c.uid, c, cls);
+  const roleOf = (phase: 0 | 1) =>
+    setup.mode === "duo" ? (phase === 0 ? "进攻方" : "防守方") : setup.mode === "ai-attack" ? "进攻方" : "防守方";
+  const role = roleOf(ds.phase);
+  const cards = Object.values(charDefs)
+    .map((d) => {
+      const picked = ds.selected.includes(d.id);
+      return `
+      <div class="draft-card ${picked ? "picked" : ""}" data-draft="${d.id}">
+        ${charArt(d)}
+        <div class="draft-name">${d.name}</div>
+        <div class="draft-tags">
+          <span class="tag ${d.domain}">${d.domain === "sky" ? "天空" : "地面"}</span>
+          <span class="tag">💰${d.cost}</span>
+          <span class="tag">❤${d.hp}</span>
+          <span class="tag">⚔${d.atk}</span>
+          <span class="tag">${d.domain === "sky" ? "天" : "地"}${d.atkVal}/${d.defVal}</span>
+        </div>
+        <div class="draft-passive">✦ ${d.passiveText}</div>
+      </div>`;
     })
     .join("");
+  return `
+  <div class="screen draft">
+    <header class="draft-head">
+      <h2>${role} · 选择角色 <b class="${ds.selected.length === 8 ? "ok" : ""}">${ds.selected.length}/8</b></h2>
+      ${setup.mode === "duo" && ds.phase === 1 ? `<p class="sub">请把设备交给防守方玩家</p>` : ""}
+    </header>
+    <div class="draft-grid">${cards}</div>
+    <footer class="draft-foot">
+      <button id="draft-reset" class="ghost">重选</button>
+      <button id="draft-confirm" class="primary" ${ds.selected.length === 8 ? "" : "disabled"}>确认出战 →</button>
+    </footer>
+  </div>`;
+}
 
-  const myBoard = me.board
-    .map((c) => {
-      const key = refKey({ kind: "creature", side: 0, uid: c.uid });
-      const cls =
-        mode.kind === "selectAttacker" && mode.uid === c.uid
-          ? "selected"
-          : targets.has(key)
-            ? "targetable"
-            : c.attacksLeft > 0 && c.atk > 0
-              ? "ready"
-              : "";
-      return creatureHtml(c.uid, c, cls);
-    })
-    .join("");
+// ---------- 战斗屏 ----------
 
-  const hand = me.hand
+function posKey(pos: CellPos): string {
+  return `${pos.row}-${pos.col}`;
+}
+
+function chipHtml(
+  c: FieldChar,
+  ui: UiState,
+  extraCls: string,
+): string {
+  const fx = ui.fx;
+  const cls = [
+    "chip",
+    extraCls,
+    fx.attackUid === c.uid ? "fx-attack" : "",
+    fx.hitUids.has(c.uid) ? "fx-hit" : "",
+    fx.healUids.has(c.uid) ? "fx-heal" : "",
+    fx.spUids.has(c.uid) ? "fx-sp" : "",
+    fx.deployUid === c.uid ? "fx-deploy" : "",
+  ]
+    .filter(Boolean)
+    .join(" ");
+  const hpPct = Math.max(0, Math.round((c.hp / c.maxHp) * 100));
+  const orbs = Array.from({ length: c.spMax }, (_, i) => (i < c.sp ? "●" : "○")).join("");
+  const laneTag = c.elevated || c.domain === "sky" ? "天" : "地";
+  return `
+  <div class="${cls}" data-uid="${c.uid}" data-side="${c.owner}" data-domain="${c.domain}">
+    <div class="chip-art">${charThumb(c.defId, c.name)}</div>
+    <div class="chip-body">
+      <div class="chip-name">${c.name}${c.elevated ? ' <i class="badge elev">高地</i>' : ""}${c.equipment ? ' <i class="badge eq">🛡</i>' : ""}</div>
+      <div class="chip-hp"><i style="width:${hpPct}%"></i><span>${Math.max(0, c.hp)}/${c.maxHp}</span></div>
+      <div class="chip-row"><span class="chip-atk">⚔${c.atk}</span><span class="chip-def">${laneTag}${c.defVal}</span><span class="chip-orbs">${orbs}</span></div>
+    </div>
+  </div>`;
+}
+
+function cellHtml(
+  s: GameState,
+  ui: UiState,
+  side: Side,
+  pos: CellPos,
+  defs: Record<string, CharDef>,
+): string {
+  const classes = ["cell"];
+  if (side === 1 && pos.row === 0) classes.push("highland");
+  const blocked = isBlockedCell(s, pos);
+  if (blocked) classes.push("volcano");
+  else if (s.terrain === "volcano" && volcanoBlastCells(side).some((b) => b.row === pos.row && b.col === pos.col))
+    classes.push("blast");
+  // 部署/移动目标格只标在己方区域
+  const m = ui.mode;
+  if ((m.kind === "deploy" || m.kind === "movePick") && side === ui.viewer && !blocked) {
+    classes.push("deployable", "cell-active");
+    if (m.kind === "deploy") {
+      const handUid = m.handUid;
+      const p = s.players[ui.viewer];
+      const hand = p.handChars.find((h) => h.uid === handUid);
+      const def = hand ? defs[hand.defId] : undefined;
+      if (hand && def) {
+        const elevated = p.role === "defense" && def.domain === "ground" && pos.row === 0;
+        if (deployCostOf(def, hand.deathCount, elevated) > p.cost) classes.push("poor");
+        if (elevated) classes.push("elev-cell");
+      }
+    }
+  }
+  const chars = s.players[side].field.filter((c) => c.pos.row === pos.row && c.pos.col === pos.col);
+  const mode = ui.mode;
+  const itemNeed = mode.kind === "item" ? itemTargetOf(mode.handUid) : null;
+  const label = blocked
+    ? `<span class="cell-tag volcano">火山口</span>`
+    : side === 1 && pos.row === 0
+      ? `<span class="cell-tag">高地 ×2</span>`
+      : classes.includes("blast")
+        ? `<span class="cell-tag blast-tag">火山带</span>`
+        : "";
+  return `
+  <div class="${classes.filter(Boolean).join(" ")}" data-row="${pos.row}" data-col="${pos.col}" data-zone="${side}">
+    ${label}
+    <div class="cell-chips">${chars.map((c) => {
+      const selected =
+        (mode.kind === "charMenu" && mode.uid === c.uid) ||
+        ((mode.kind === "attack" || mode.kind === "burst") && mode.uid === c.uid);
+      const targetable =
+        ((mode.kind === "attack" || mode.kind === "burst") && c.owner !== ui.viewer) ||
+        (mode.kind === "item" && (itemNeed === "own_char" ? c.owner === ui.viewer : c.owner !== ui.viewer)) ||
+        (mode.kind === "movePick" && c.owner === ui.viewer);
+      const cls = [selected ? "selected" : "", targetable ? "targetable" : ""].filter(Boolean).join(" ");
+      return chipHtml(c, ui, cls);
+    }).join("")}</div>
+  </div>`;
+}
+
+// 由 main 注入的目标查询（避免把 itemDefs 传来传去）
+let itemTargetLookup: (handUid: number) => "own_char" | "enemy_char" | "none" = () => "none";
+export function setItemTargetLookup(fn: (handUid: number) => "own_char" | "enemy_char" | "none"): void {
+  itemTargetLookup = fn;
+}
+function itemTargetOf(handUid: number): "own_char" | "enemy_char" | "none" {
+  return itemTargetLookup(handUid);
+}
+
+function handHtml(s: GameState, ui: UiState, defs: Record<string, CharDef>, itemDefs: Record<string, ItemDef>): string {
+  const p = s.players[ui.viewer];
+  const myTurn = s.active === ui.viewer && s.winner === null && !s.passed[ui.viewer];
+  const charCards = p.handChars
     .map((h) => {
-      const def = defs[h.cardId];
-      return def ? handCardHtml(h.uid, def, myTurn && me.mana >= def.cost) : "";
+      const def = defs[h.defId];
+      if (!def) return "";
+      const cooling = h.cooldown > 0;
+      const cost = deployCostOf(def, h.deathCount, false);
+      const poor = cost > p.cost;
+      const sel = ui.mode.kind === "deploy" && ui.mode.handUid === h.uid;
+      return `
+      <div class="hand-card char-card ${cooling ? "cooling" : ""} ${poor && !cooling ? "poor" : ""} ${sel ? "selected" : ""}"
+           data-hand-char="${h.uid}" title="${def.passiveText}">
+        ${charArt(def)}
+        <div class="hand-cost">💰${cost}</div>
+        ${cooling ? `<div class="hand-cool">⏳冷却 ${h.cooldown}</div>` : ""}
+        <div class="hand-name">${def.name}</div>
+        <div class="hand-stats"><span class="${def.domain}">${def.domain === "sky" ? "天空" : "地面"} ${def.atkVal}/${def.defVal}</span> ❤${def.hp} ⚔${def.atk} ⚡${def.spMax}</div>
+      </div>`;
     })
     .join("");
-
-  const log = state.log
-    .slice(-40)
-    .reverse()
-    .map((l) => `<div class="log-line">${l}</div>`)
+  const itemCards = p.handItems
+    .map((h) => {
+      const def = itemDefs[h.itemId];
+      if (!def) return "";
+      const poor = def.cost > p.cost;
+      const sel = (ui.mode.kind === "item" || ui.mode.kind === "movePick") && ui.mode.handUid === h.uid;
+      return `
+      <div class="hand-card item-card ${poor ? "poor" : ""} ${sel ? "selected" : ""}" data-hand-item="${h.uid}" title="${def.text}">
+        ${itemArt(def)}
+        <div class="hand-cost">💰${def.cost}</div>
+        <div class="hand-name">${def.name}</div>
+        <div class="hand-stats">${def.text}</div>
+      </div>`;
+    })
     .join("");
+  return `
+  <div class="hand ${myTurn ? "" : "dim"}">${charCards}${itemCards}</div>`;
+}
 
-  const overlay =
-    state.winner !== null
-      ? `<div class="overlay"><div class="overlay-box">
-           <div class="overlay-title">${state.winner === 0 ? "🏆 胜利！" : state.winner === "draw" ? "⚖ 平局" : "💀 失败"}</div>
-           <button id="restart">再来一局</button>
-         </div></div>`
+function controlsHtml(s: GameState, ui: UiState, defs: Record<string, CharDef>, itemDefs: Record<string, ItemDef>): string {
+  const p = s.players[ui.viewer];
+  const myTurn = s.active === ui.viewer && s.winner === null;
+  if (!myTurn || s.passed[ui.viewer]) {
+    return `<div class="controls"><span class="waiting">${s.winner ? "对局结束" : s.passed[ui.viewer] ? "已宣告结束，等待对方…" : "对方行动中…"}</span></div>`;
+  }
+  if (ui.mode.kind === "charMenu") {
+    const selUid = ui.mode.uid;
+    const c = s.players[ui.viewer].field.find((x) => x.uid === selUid);
+    if (c) {
+      const def = defs[c.defId];
+      const canSkill = !c.skillUsed;
+      const canBurst = canSkill && c.sp >= c.spMax && def;
+      const burstNeedsTarget = def?.burst.target === "one_enemy";
+      return `
+      <div class="controls menu">
+        <button class="act" data-act="normal">普通攻击${c.passive === "healer" ? "（治疗）" : ""}</button>
+        <button class="act burst" data-act="burst" ${canBurst ? "" : "disabled"}>大招·${def!.burst.name}${burstNeedsTarget ? "（选目标）" : ""}</button>
+        <button class="act danger" data-act="undeploy">下阵（返 ⌊${Math.floor(c.paidCost / 2)}⌋）</button>
+        <button class="act ghost" data-act="inspect">详情</button>
+        <button class="act ghost" data-act="cancel">取消</button>
+      </div>`;
+    }
+  }
+  if (ui.mode.kind === "deploy" || ui.mode.kind === "attack" || ui.mode.kind === "burst" || ui.mode.kind === "item" || ui.mode.kind === "movePick") {
+    const itemHint =
+      ui.mode.kind === "item"
+        ? `选择目标使用「${handItemName(s, ui.viewer, ui.mode.handUid, itemDefs)}」`
+        : "";
+    const hints: Record<string, string> = {
+      deploy: "点击格子上阵（高地双倍费用）",
+      attack: "点击敌方角色进行攻击",
+      burst: "点击敌方角色释放大招",
+      item: itemHint,
+      movePick: "点击要移动的我方角色",
+    };
+    return `<div class="controls"><span class="hint">${hints[ui.mode.kind]}</span><button class="act ghost" data-act="cancel">取消</button></div>`;
+  }
+  return `<div class="controls"><button id="btn-pass" class="primary">结束回合</button></div>`;
+}
+
+function handItemName(s: GameState, side: Side, uid: number, itemDefs: Record<string, ItemDef>): string {
+  const h = s.players[side].handItems.find((x) => x.uid === uid);
+  return h ? itemDefs[h.itemId]?.name ?? "" : "";
+}
+
+function laneStrip(s: GameState): string {
+  const atkSide = (s.players[0].role === "attack" ? 0 : 1) as Side;
+  const atk = laneTotals(s, atkSide);
+  const def = laneTotals(s, (1 - atkSide) as Side);
+  const gBreach = atk.ground > def.ground;
+  const sBreach = atk.sky > def.sky;
+  const verdict = gBreach || sBreach ? (gBreach && sBreach ? "双线告破" : gBreach ? "地面告破" : "天空告破") : "防线稳固";
+  return `
+  <div class="lane-strip">
+    <span class="lane ${gBreach ? "breach" : ""}">地 ${atk.ground} : ${def.ground}</span>
+    <span class="lane ${sBreach ? "breach" : ""}">天 ${atk.sky} : ${def.sky}</span>
+    <span class="verdict ${gBreach || sBreach ? "bad" : "good"}">${verdict}</span>
+  </div>`;
+}
+
+function zoneInfoHtml(s: GameState, side: Side): string {
+  const p = s.players[side];
+  const role = p.role === "attack" ? "⚔ 进攻方" : "🛡 防守方";
+  const hpBar =
+    p.role === "defense"
+      ? `<div class="total-hp" data-totalhp="${side}"><div class="total-hp-bar"><i style="width:${Math.max(0, (p.totalHp / p.totalHpMax) * 100)}%"></i></div><span>🏰 ${Math.max(0, p.totalHp)}/${p.totalHpMax}</span></div>`
       : "";
+  return `
+  <div class="zone-info">
+    <span class="pname ${p.role}">${p.name} · ${role}</span>
+    <span class="meta">💰 ${p.cost}</span>
+    <span class="meta">✋ ${p.handChars.length + p.handItems.length}</span>
+    <span class="meta">🗃 ${s.itemDeck.length}</span>
+    ${hpBar}
+  </div>`;
+}
 
-  const hint =
-    mode.kind === "targetPlay"
-      ? "点击高亮目标（再点一次手牌取消）"
-      : mode.kind === "selectAttacker"
-        ? "选择攻击目标（点击已选随从取消）"
-        : myTurn
-          ? "出牌 → 点击随从攻击 → 结束回合"
-          : "对方回合…";
+export function renderBattle(
+  s: GameState,
+  ui: UiState,
+  defs: Record<string, CharDef>,
+  itemDefs: Record<string, ItemDef>,
+): string {
+  const diff = DIFFICULTY[s.difficulty];
+  const rows: CellPos[] = [
+    { row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 },
+    { row: 1, col: 0 }, { row: 1, col: 1 }, { row: 1, col: 2 },
+  ];
+  const grid = (side: Side) =>
+    `<div class="grid" data-zone="${side}">${rows.map((pos) => cellHtml(s, ui, side, pos, defs)).join("")}</div>`;
+
+  const inspectChar =
+    ui.inspectUid !== null
+      ? [...s.players[0].field, ...s.players[1].field].find((c) => c.uid === ui.inspectUid)
+      : undefined;
+  const inspect = inspectChar
+    ? `<div class="inspect" data-inspect-panel>
+        <button class="inspect-close" data-act="close-inspect">✕</button>
+        ${(() => {
+          const def = defs[inspectChar.defId]!;
+          const lane = inspectChar.elevated ? "天空（高地转化）" : inspectChar.domain === "sky" ? "天空" : "地面";
+          return `<h3>${inspectChar.name} <small>${def.title}</small></h3>
+          <p>生命 ${inspectChar.hp}/${inspectChar.maxHp} · 攻击 ${inspectChar.atk} · 技能点 ${inspectChar.sp}/${inspectChar.spMax}</p>
+          <p>${lane}进攻 ${inspectChar.atkVal} / 防守 ${inspectChar.defVal}${inspectChar.elevated ? "（计入天空防守）" : ""}</p>
+          <p>被动 ✦ ${inspectChar.passiveText}</p>
+          <p>大招 🌟 ${def.burst.name}：${def.burst.text}</p>
+          <p>${inspectChar.skillUsed ? "本回合已使用技能" : "本回合尚未使用技能"}${inspectChar.equipment ? " · 已装备 🛡 防御胸甲" : ""}</p>`;
+        })()}
+      </div>`
+    : "";
+
+  const winnerOverlay = s.winner
+    ? `<div class="overlay"><div class="overlay-box">
+        <div class="overlay-title">${winTitle(s, ui.viewer)}</div>
+        <p class="overlay-reason">${s.winner.reason}</p>
+        <button id="btn-again" class="primary">再来一局</button>
+      </div></div>`
+    : "";
+
+  const logLines = s.log.slice(-60).reverse().map((l) => `<div class="log-line">${l}</div>`).join("");
 
   return `
-    <div class="layout">
-      <main class="arena">
-        <section class="hero-panel enemy ${targets.has("hero:1") ? "targetable" : ""}" data-hero="1">
-          <span class="hp">❤ ${Math.max(0, foe.hp)}</span>
-          <span class="mana">🔹 ${foe.mana}/${foe.maxMana}</span>
-          <span class="meta">🤖 ${foe.name}</span>
-          <span class="meta">手牌 ${foe.hand.length} · 牌库 ${foe.deck.length}</span>
-        </section>
-        <section class="board-row">${foeBoard}</section>
-        <section class="board-row">${myBoard}</section>
-        <section class="hero-panel mine ${targets.has("hero:0") ? "targetable" : ""}" data-hero="0">
-          <span class="hp">❤ ${Math.max(0, me.hp)}</span>
-          <span class="mana">🔹 ${me.mana}/${me.maxMana}</span>
-          <span class="meta">🙂 ${me.name}</span>
-          <button id="end-turn" ${myTurn && mode.kind === "idle" ? "" : "disabled"}>结束回合</button>
-          <span class="meta">牌库 ${me.deck.length}</span>
-        </section>
-        <section class="hand-row">${hand}</section>
-        <footer class="hint">${hint}</footer>
-      </main>
-      <aside class="log"><h3>战报</h3>${log}</aside>
-      ${overlay}
-    </div>`;
+  <div class="app">
+    <header class="topbar">
+      <span class="round-chip">第 ${s.round}/${diff.rounds} 回合</span>
+      ${laneStrip(s)}
+      <button id="btn-help" class="icon-btn">玩法</button>
+      <button id="btn-log" class="icon-btn">战报</button>
+    </header>
+    <main class="battlefield">
+      <section class="zone enemy">${zoneInfoHtml(s, 1)}${grid(1)}</section>
+      <div class="midline"><span>⚔</span></div>
+      <section class="zone mine">${zoneInfoHtml(s, 0)}${grid(0)}</section>
+    </main>
+    <section class="dock">
+      ${controlsHtml(s, ui, defs, itemDefs)}
+      ${handHtml(s, ui, defs, itemDefs)}
+    </section>
+    ${inspect}
+    <aside class="log ${ui.logOpen ? "open" : ""}">
+      <div class="log-head">战报 <button class="inspect-close" data-act="close-log">✕</button></div>
+      <div class="log-body">${logLines}</div>
+    </aside>
+    ${winnerOverlay}
+  </div>`;
+}
+
+function winTitle(s: GameState, viewer: Side): string {
+  if (s.winner!.side === "defense") {
+    return s.players[viewer].role === "defense" ? "🏆 防守成功！" : "💀 进攻失败";
+  }
+  if (s.winner!.side === viewer) {
+    return s.players[viewer].role === "attack" ? "🏆 防线告破，胜利！" : "🏆 防守成功！";
+  }
+  return s.players[viewer].role === "attack" ? "💀 进攻失败" : "💀 防线告破";
+}
+
+export function helpContent(): string {
+  return `
+  <h2>玩法说明</h2>
+  <div class="help-body">
+    <h3>🎯 胜利条件</h3>
+    <p><b>进攻方</b>：把防守方总生命（标准 10 / 艰难 15）扣到 0。<br><b>防守方</b>：完整守住 10 / 15 个回合。</p>
+    <h3>🔄 回合流程</h3>
+    <p>每回合双方各获得 15 部署费用（可累计）。防守方先行动，双方轮流：可先不限次使用道具牌，再选择其一——上阵角色 / 下阵角色（视为死亡进冷却，返还一半部署费）/ 使用角色技能 / 结束回合。双方都结束后结算：各抽 2 张道具牌 → 全场角色 +2 技能点 → 地形伤害 → 攻防比对。</p>
+    <h3>⚔ 攻防比对</h3>
+    <p>统计进攻方地面/天空进攻值与防守方地面/天空防守值。任一线<b>进攻 &gt; 防守</b>即突破：扣除两线差值之和的总生命；两线都守住则无伤。</p>
+    <h3>🗺 站位</h3>
+    <p>每方 2×3 区域。防守方前排除外（后排）为高地：天空角色可放任意区域；地面角色放前排提供地面防守，也可花双倍部署费上高地转为天空防守。进攻方站位不影响数值。火山地形下双方后排中间为火山口（不可部署），其上/左/右区域的角色每回合结束受 6 点真实伤害。</p>
+    <h3>🧙 角色</h3>
+    <p>属性：部署费、生命、攻击、技能点上限、地面或天空的进攻/防守值。<br>技能一（普通攻击）：按攻击力伤害敌方角色（治愈师被动改为治疗我方），不耗技能点。<br>技能二（大招）：技能点满才能释放，释放后清空。<br>被动：每角色一个，自动生效。</p>
+    <h3>⚡ 技能点</h3>
+    <p>每回合结束全场角色 +2；角色每攻击或治疗一次 +1。每回合每角色只能使用普攻或大招其一（刚上场的角色当回合也可用一次）。</p>
+    <h3>☠ 死亡与冷却</h3>
+    <p>角色死亡后冷却 5 个完整回合回到手牌；再次上阵费用 = 原费用 ×(1 + 0.5×死亡次数)。</p>
+    <h3>🃏 道具牌</h3>
+    <p>公共牌库共 80 张，首回合各抽 5 张、每回合结束各抽 2 张。使用消耗部署费用，每回合不限次数；用后是否洗回依牌面说明。</p>
+    <h3>💡 提示</h3>
+    <p>点击场上角色查看详情；点击我方角色打开行动菜单；点击手牌角色进入部署，点击手牌道具选择目标。真实伤害无视被动、减伤与装备。</p>
+  </div>`;
 }

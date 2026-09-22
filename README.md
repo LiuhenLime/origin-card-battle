@@ -1,8 +1,8 @@
-# 卡牌对战（原型）
+# 攻防对决（卡牌对战）
 
-一个基于原创世界观的卡牌战斗桌游程序。当前是**可完整游玩的规则引擎 + 人机对战原型**：示例卡组驱动的 1v1 回合制卡牌对战，浏览器即玩。
+一个攻防塔防式卡牌桌游程序：进攻方摧毁防线、防守方固守回合的人机 / 双人对战，浏览器即玩，桌面与移动端自适应。
 
-> 世界观内容尚未写入 —— `data/cards.json` 里的卡牌均为标有【示例卡】的占位卡组，用于验证引擎。按下面的「添加你自己的卡牌」逐步替换即可，**全程不需要改任何代码**。
+规则依据桌面《游戏说明》文本实现，完整规则见 [docs/rules.md](docs/rules.md)，游戏内「玩法」按钮也可随时查看。
 
 ## 快速开始
 
@@ -18,55 +18,65 @@ npm run build    # 类型检查 + 产出 dist/
 
 首次启用：仓库 **Settings → Pages → Source 选择 GitHub Actions**，之后每次推送自动更新。
 
+## 玩法一览
+
+- **阵营**：进攻方把防守方总生命（10/15，依难度）扣到 0；防守方完整守住 10/15 回合。
+- **资源**：每回合双方各得 15 部署费用（可累计）；80 张道具牌入公共牌库，首回合各抽 5 张、每回合结束各抽 2 张。
+- **行动**：防守方先手、双方轮流；每次行动可不限次用道具牌，再上阵 / 下阵 / 使用技能 / 结束回合。
+- **结算**：回合结束比对地面、天空两条线的进攻与防守值，任一线突破即扣除差值之和的总生命。
+- **角色**：费用 / 生命 / 攻击 / 技能点 / 地(天)攻防值 + 被动；普通攻击不耗点，大招满点清空，死亡冷却 5 回合后费用递增。
+- **地形**：平原或火山（火山口不可部署，周边格每回合受 6 点真实伤害）。
+
 ## 目录结构
 
 ```
-data/cards.json        卡牌定义（数据驱动，加卡只改这里）
-src/engine/types.ts    核心类型：卡牌定义 / 对局状态 / 效果
-src/engine/state.ts    建局、回合推进、抽牌与疲劳
-src/engine/actions.ts  玩家行动：出牌 / 攻击 / 结束回合（全部规则校验）
-src/engine/effects.ts  效果结算器（伤害/治疗/增益/抽牌 × 多种目标）
-src/engine/ai.ts       贪心 AI（斩杀 > 出牌 > 优势交换 > 打脸）
-src/ui/                渲染与交互（纯展示层，不含规则）
+data/characters.json   角色牌定义（10 张，开局各选 8 张）
+data/items.json        道具牌定义（11 种共 80 张公共牌库）
+src/engine/types.ts    核心类型：角色/道具/对局状态/事件
+src/engine/state.ts    建局、抽牌、回合结算
+src/engine/combat.ts   攻防值统计、伤害/治疗、死亡与冷却
+src/engine/actions.ts  玩家行动：上阵/下阵/技能/道具/结束回合（全部规则校验）
+src/engine/effects.ts  道具牌效果结算
+src/engine/ai.ts       贪心 AI（攻防双阵营，行动预算控制）
+src/ui/                渲染与交互（程序化 SVG 牌面、动画、响应式布局）
 docs/rules.md          完整规则说明书
-docs/worldview.md      世界观与卡牌设计模板（等你的设定填进来）
 ```
 
 ## 架构原则
 
-- **数据与引擎分离**：卡牌数值、效果、文本全部是 `data/cards.json` 里的数据；引擎只认通用效果原语（`damage / heal / buff / draw` × 目标选择器）。
-- **规则校验集中在引擎**：UI 和 AI 调用同一套 `playCard / attack`，不可能绕过规则。
-- **UI 可整体替换**：`src/ui` 只读状态做渲染，未来换成更精美的界面不影响规则。
+- **数据与引擎分离**：角色与道具全部是 `data/*.json` 里的数据；引擎只认通用效果原语，加卡不需要改代码。
+- **规则校验集中在引擎**：UI 和 AI 调用同一套行动函数，不可能绕过规则。
+- **事件驱动动画**：引擎产出结构化 `GameEvent`，UI 据此播放攻击突进、受击抖动、伤害飘字、部署落场等动画。
+- **UI 可整体替换**：`src/ui` 只读状态做渲染，不含规则。
 
 ## 添加你自己的卡牌
 
-往 `data/cards.json` 加一条（示例）：
+往 `data/characters.json` 加一条（示例）：
 
 ```json
 {
-  "id": "my_dragon",
-  "name": "你的巨龙名字",
-  "type": "creature",
-  "cost": 6,
-  "atk": 6,
-  "hp": 7,
-  "taunt": true,
-  "battlecry": [{ "type": "damage", "target": "all_enemy_creatures", "value": 2 }],
-  "text": "战吼：对所有敌方随从造成 2 点伤害。",
-  "count": 1
+  "id": "my_knight",
+  "name": "银盾骑士",
+  "title": "持盾而立的忠诚卫士",
+  "cost": 10, "hp": 18, "atk": 5, "spMax": 6,
+  "domain": "ground", "atkVal": 1, "defVal": 3,
+  "burst": { "name": "盾墙", "target": "self", "defBuff": 2, "text": "自己的防守值永久 +2。" },
+  "passive": "none", "passiveText": "无。",
+  "text": "地面单位。地面进攻 1 / 防守 3。"
 }
 ```
 
-可用效果原语：`damage / heal / buff / draw`；可用目标：`enemy_hero / own_hero / enemy_creature / own_creature / any_creature / any / all_enemy_creatures / all_own_creatures / random_enemy_creature`。`count` 是该卡在起始卡组中的张数（双方同构筑，各 30 张）。
+道具牌往 `data/items.json` 加一条，设置 `count` 控制其在 80 张公共牌库中的张数。
+可用效果原语：`heal / sp / damage / equip_armor / atk_buff / def_buff / draw / move / weaken`。
 
-扩展新原语（如「沉默」「召唤」）：在 `src/engine/effects.ts` 的 `EffectType` 与 `applyEffect` 各加一个分支即可。
+扩展新被动：在 `src/engine/types.ts` 的 `PassiveId` 与 `src/engine/combat.ts` 各加一个分支即可。
 
 ## 路线图
 
-- [ ] 世界观设定集与卡牌替换（进行中）
-- [ ] 阵营/职业系统与多卡组构筑
-- [ ] 更强 AI（场面评估 / 搜索）
-- [ ] 动画与音效
+- [x] 攻防对决规则引擎（部署费用 / 攻防值 / 冷却 / 地形）
+- [x] 程序化牌面美术、战斗动画、移动端适配
+- [x] 玩法说明弹窗与场上卡牌详情查看
+- [ ] 更多角色与道具牌
 - [ ] 联机对战
 
 ## 许可证

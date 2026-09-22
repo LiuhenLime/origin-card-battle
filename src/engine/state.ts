@@ -1,10 +1,16 @@
-// 对局状态构建与回合推进
-import type { CardDef, GameState, PlayerState, Side } from "./types";
-
-export const MAX_HAND = 10;
-export const MAX_MANA = 10;
-export const MAX_BOARD = 7;
-export const START_HP = 30;
+// 对局构建、抽牌与回合结算。
+import type {
+  CharDef,
+  FieldChar,
+  GameConfig,
+  GameState,
+  HandItem,
+  ItemDef,
+  PlayerState,
+  Side,
+} from "./types";
+import { COST_PER_ROUND, DIFFICULTY, volcanoBlastCells } from "./types";
+import { damageChar, gainSp, healChar, laneTotals } from "./combat";
 
 /** Fisher–Yates 洗牌（返回新数组） */
 export function shuffle<T>(arr: readonly T[]): T[] {
@@ -16,84 +22,187 @@ export function shuffle<T>(arr: readonly T[]): T[] {
   return a;
 }
 
-/** 按每张卡的 count 字段把卡组展开并洗匀 */
-export function buildDeck(defs: readonly CardDef[]): string[] {
-  const list: string[] = [];
-  for (const d of defs) {
-    for (let i = 0; i < (d.count ?? 1); i++) list.push(d.id);
-  }
-  return shuffle(list);
+export function opponent(side: Side): Side {
+  return (1 - side) as Side;
 }
 
-export function createPlayer(id: Side, name: string, deck: string[]): PlayerState {
+/** 创建 FieldChar */
+function makeFieldChar(def: CharDef, uid: number, owner: Side, paidCost: number): FieldChar {
   return {
-    id,
-    name,
-    hp: START_HP,
-    maxHp: START_HP,
-    mana: 0,
-    maxMana: 0,
-    deck,
-    hand: [],
-    board: [],
-    fatigue: 0,
+    uid,
+    defId: def.id,
+    name: def.name,
+    owner,
+    pos: { row: 1, col: 0 },
+    hp: def.hp,
+    maxHp: def.hp,
+    atk: def.atk,
+    sp: def.initSp ?? 0,
+    spMax: def.spMax,
+    atkVal: def.atkVal,
+    defVal: def.defVal,
+    domain: def.domain,
+    elevated: false,
+    equipment: null,
+    paidCost,
+    skillUsed: false,
+    passive: def.passive,
+    passiveText: def.passiveText,
   };
 }
 
-/** 检查并记录胜负（血量归零即负；同归为平局） */
-export function checkWinner(s: GameState): void {
-  if (s.winner !== null) return;
-  const [a, b] = s.players;
-  if (a.hp <= 0 && b.hp <= 0) s.winner = "draw";
-  else if (a.hp <= 0) s.winner = 1;
-  else if (b.hp <= 0) s.winner = 0;
-}
-
-/** 抽一张牌：牌库空 → 疲劳递增扣血；手牌满 → 烧牌 */
-export function drawCard(s: GameState, side: Side): void {
+/** 从公共牌库抽 n 张道具牌 */
+export function drawItems(s: GameState, side: Side, n: number): void {
   const p = s.players[side];
-  if (p.deck.length === 0) {
-    p.fatigue += 1;
-    p.hp -= p.fatigue;
-    s.log.push(`⚡ ${p.name} 牌库枯竭，受到 ${p.fatigue} 点疲劳伤害（剩余 ${Math.max(0, p.hp)}）`);
-    checkWinner(s);
-    return;
+  for (let i = 0; i < n; i++) {
+    const card = s.itemDeck.pop();
+    if (!card) return; // 牌库枯竭：静默停止
+    p.handItems.push(card);
   }
-  const cardId = p.deck.pop()!;
-  if (p.hand.length >= MAX_HAND) {
-    s.log.push(`🔥 ${p.name} 手牌已满，烧掉了一张牌`);
-    return;
-  }
-  p.hand.push({ uid: s.nextUid++, cardId });
 }
 
-/** 开始一个回合：法力水晶成长、随从解除眩晕并恢复攻击、抽一张牌 */
-export function startTurn(s: GameState, side: Side): void {
-  s.active = side;
-  s.turn += 1;
-  const p = s.players[side];
-  p.maxMana = Math.min(MAX_MANA, p.maxMana + 1);
-  p.mana = p.maxMana;
-  for (const c of p.board) c.attacksLeft = 1;
-  drawCard(s, side);
-  s.log.push(`── 第 ${Math.ceil(s.turn / 2)} 回合 · ${p.name}（法力 ${p.mana}/${p.maxMana}）`);
-}
+/** 创建一局 */
+export function createGame(
+  config: GameConfig,
+  charDefs: Record<string, CharDef>,
+  itemDefs: Record<string, ItemDef>,
+): GameState {
+  const role0: PlayerState["role"] = config.mode === "duo" ? "attack" : config.playerRole;
+  const roles: [PlayerState["role"], PlayerState["role"]] = [role0, role0 === "attack" ? "defense" : "attack"];
+  const diff = DIFFICULTY[config.difficulty];
 
-/** 创建一局：双方同卡组构筑、先手 3 张后手 4 张 */
-export function createGame(defs: readonly CardDef[], names: [string, string]): GameState {
+  let uid = 1;
+  const makePlayer = (id: Side): PlayerState => ({
+    id,
+    name: config.names[id],
+    role: roles[id],
+    cost: COST_PER_ROUND,
+    handChars: config.decks[id].map((defId) => ({ uid: uid++, defId, cooldown: 0, deathCount: 0 })),
+    handItems: [],
+    field: [],
+    totalHp: roles[id] === "defense" ? diff.hp : 0,
+    totalHpMax: roles[id] === "defense" ? diff.hp : 0,
+  });
+
+  const deck: HandItem[] = [];
+  for (const def of Object.values(itemDefs)) {
+    for (let i = 0; i < def.count; i++) deck.push({ uid: uid++, itemId: def.id });
+  }
+
   const s: GameState = {
-    players: [
-      createPlayer(0, names[0], buildDeck(defs)),
-      createPlayer(1, names[1], buildDeck(defs)),
-    ],
-    active: 0,
-    turn: 0,
+    players: [makePlayer(0), makePlayer(1)],
+    active: roles[0] === "defense" ? 0 : 1, // 防守方先行动
+    passed: [false, false],
+    round: 1,
+    terrain: config.terrain,
+    difficulty: config.difficulty,
+    itemDeck: shuffle(deck),
     winner: null,
     log: [],
-    nextUid: 1,
+    events: [],
+    nextUid: uid,
   };
-  for (let i = 0; i < 3; i++) drawCard(s, 0);
-  for (let i = 0; i < 4; i++) drawCard(s, 1);
-  startTurn(s, 0);
+
+  drawItems(s, 0, 5);
+  drawItems(s, 1, 5);
+  s.log.push(
+    `── 第 1 回合 · ${s.players[s.active].name}（${roles[s.active] === "attack" ? "进攻方" : "防守方"}）先行动`,
+  );
+  s.log.push(`🎯 ${roles[1] === "defense" ? s.players[1].name : s.players[0].name} 需守住 ${diff.hp} 点总生命 ${diff.rounds} 回合`);
   return s;
 }
+
+/**
+ * 回合结束结算：抽牌 → 技能点 → 被动回复 → 地形伤害 → 攻防比对 → 胜负 → 冷却 → 费用。
+ * 结算完成后开启新一轮，防守方先行动。
+ */
+export function endRoundSettlement(
+  s: GameState,
+  charDefs: Record<string, CharDef>,
+): void {
+  const round = s.round;
+  s.log.push(`── 第 ${round} 回合结算`);
+
+  // 1) 双方各抽 2 张道具牌
+  drawItems(s, 0, 2);
+  drawItems(s, 1, 2);
+
+  // 2) 场上所有角色 +2 技能点
+  for (const side of [0, 1] as const) {
+    for (const c of [...s.players[side].field]) {
+      gainSp(s, c, 2);
+    }
+  }
+
+  // 3) 被动回合回复（骷髅弓手白骨）
+  for (const side of [0, 1] as const) {
+    for (const c of [...s.players[side].field]) {
+      if (c.passive === "bones" && c.hp > 0) healChar(s, c, 1);
+    }
+  }
+
+  // 4) 地形伤害（火山口上/左/右区域，真实伤害；石像鬼免疫）
+  if (s.terrain === "volcano") {
+    for (const side of [0, 1] as const) {
+      const blast = volcanoBlastCells(side);
+      for (const c of [...s.players[side].field]) {
+        const hit = blast.some((b) => b.row === c.pos.row && b.col === c.pos.col);
+        if (hit && c.passive !== "stone_wing") {
+          s.events.push({ t: "volcano", side, uid: c.uid });
+          damageChar(s, c, 6, { pure: true, source: "terrain" });
+        }
+      }
+    }
+  }
+
+  // 5) 攻防比对
+  const atkSide = (s.players[0].role === "attack" ? 0 : 1) as Side;
+  const defSide = opponent(atkSide);
+  const atkT = laneTotals(s, atkSide);
+  const defT = laneTotals(s, defSide);
+  const breach = atkT.ground > defT.ground || atkT.sky > defT.sky;
+  const groundDiff = Math.max(0, atkT.ground - defT.ground);
+  const skyDiff = Math.max(0, atkT.sky - defT.sky);
+  const total = groundDiff + skyDiff;
+  s.events.push({ t: "settlement", round, groundDiff, skyDiff, breach });
+  const defender = s.players[defSide];
+  if (breach) {
+    defender.totalHp -= total;
+    s.log.push(`⚔ 防线被突破！地面差 ${groundDiff} + 天空差 ${skyDiff}，${defender.name} 总生命 -${total}（${Math.max(0, defender.totalHp)}/${defender.totalHpMax}）`);
+  } else {
+    s.log.push(`🛡 防守成功！地面 ${defT.ground}≥${atkT.ground}，天空 ${defT.sky}≥${atkT.sky}`);
+  }
+
+  // 6) 胜负判定
+  if (defender.totalHp <= 0) {
+    s.winner = { side: atkSide, reason: `防守方总生命归零` };
+  } else if (round >= DIFFICULTY[s.difficulty].rounds) {
+    s.winner = { side: "defense", reason: `防守方完整守住了 ${DIFFICULTY[s.difficulty].rounds} 个回合` };
+  }
+
+  // 7) 冷却递减（死亡当次结算也计入）
+  for (const side of [0, 1] as const) {
+    for (const h of s.players[side].handChars) {
+      if (h.cooldown > 0) {
+        h.cooldown -= 1;
+        if (h.cooldown === 0) s.log.push(`⏳ 「${charDefs[h.defId]?.name ?? h.defId}」冷却结束，可以再次上场`);
+      }
+    }
+  }
+
+  // 8) 部署费用与新一轮（对局已结束时不再推进回合数）
+  for (const side of [0, 1] as const) {
+    const p = s.players[side];
+    p.cost += COST_PER_ROUND;
+    for (const c of p.field) c.skillUsed = false;
+  }
+  s.passed = [false, false];
+  if (!s.winner) {
+    s.round = round + 1;
+    s.active = defSide; // 防守方先行动
+    s.events.push({ t: "round", n: s.round });
+    s.log.push(`── 第 ${s.round} 回合 · ${s.players[defSide].name} 先行动`);
+  }
+}
+
+export { makeFieldChar };

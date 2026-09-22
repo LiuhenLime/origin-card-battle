@@ -1,176 +1,500 @@
-// 入口：装配卡牌数据、引擎与 UI，处理点击交互与 AI 回合调度。
+// 入口：装配数据与引擎，处理三块屏幕（设置 → 选人 → 战斗）、点击路由、AI 回合与动画管线。
 import "./ui/style.css";
-import rawCards from "../data/cards.json";
-import type { CardDef, GameState, TargetRef } from "./engine/types";
-import { attack, isPlayable, playCard, endTurn as endTurnAction } from "./engine/actions";
+import rawChars from "../data/characters.json";
+import rawItems from "../data/items.json";
+import type { CharDef, GameState, ItemDef, Side, CellPos } from "./engine/types";
 import { createGame } from "./engine/state";
-import { legalTargets, needsTarget } from "./engine/effects";
+import { deployChar, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./engine/actions";
 import { applyAiStep } from "./engine/ai";
-import { refKey, render, type UiMode } from "./ui/render";
+import {
+  emptyFx,
+  renderBattle,
+  renderDraft,
+  renderSetup,
+  setItemTargetLookup,
+  helpContent,
+  type DraftState,
+  type SetupChoice,
+  type UiState,
+} from "./ui/render";
 
-// JSON 推断为宽泛类型，收窄到 CardDef
-const CARDS = rawCards as unknown as CardDef[];
-const defs: Record<string, CardDef> = Object.fromEntries(CARDS.map((c) => [c.id, c]));
+// JSON 推断为宽泛类型，收窄到引擎定义
+const CHARS = rawChars as unknown as CharDef[];
+const ITEMS = rawItems as unknown as ItemDef[];
+const charDefs: Record<string, CharDef> = Object.fromEntries(CHARS.map((c) => [c.id, c]));
+const itemDefs: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i.id, i]));
+const GOBLIN_ID = "goblin";
 
-let state: GameState = createGame(CARDS, ["你", "AI"]);
-let mode: UiMode = { kind: "idle" };
+type Screen = "setup" | "draft" | "battle";
+
+let screen: Screen = "setup";
+let setup: SetupChoice = { mode: "ai-attack", difficulty: "normal", terrain: "plain" };
+let draft: DraftState = { picks: [[], []], phase: 0, selected: [] };
+let state: GameState | null = null;
+let ui: UiState = freshUi(0);
+let aiRunning = false;
+let mode: "ai" | "duo" = "ai";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
+function freshUi(viewer: Side): UiState {
+  return { mode: { kind: "idle" }, fx: emptyFx(), viewer, logOpen: false, inspectUid: null };
+}
+
+const sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
+
+function shuffle<T>(arr: readonly T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j]!, a[i]!];
+  }
+  return a;
+}
+
+// ---------- 渲染 ----------
+
 function paint(): void {
-  app.innerHTML = render(state, mode, defs);
-}
-
-/** 找到点击对应的目标引用；不在高亮集合里则返回 undefined */
-function hitTarget(el: Element | null): TargetRef | undefined {
-  if (!el) return undefined;
-  const heroPanel = el.closest<HTMLElement>("[data-hero]");
-  if (heroPanel) {
-    const ref: TargetRef = { kind: "hero", side: Number(heroPanel.dataset.hero) as 0 | 1 };
-    return ref;
+  if (screen === "setup") {
+    app.innerHTML = renderSetup(setup);
+  } else if (screen === "draft") {
+    app.innerHTML = renderDraft(draft, setup, charDefs);
+  } else if (state) {
+    ui.viewer = mode === "ai" ? 0 : state.active;
+    app.innerHTML = renderBattle(state, ui, charDefs, itemDefs);
   }
-  const creature = el.closest<HTMLElement>("[data-creature-uid]");
-  if (creature) {
-    const ref: TargetRef = {
-      kind: "creature",
-      side: Number(creature.dataset.side) as 0 | 1,
-      uid: Number(creature.dataset.creatureUid),
-    };
-    return ref;
-  }
-  return undefined;
 }
 
-function isTargetable(ref: TargetRef, keys: Set<string>): boolean {
-  return keys.has(refKey(ref));
+// 全局玩法说明弹窗（设置/选人/战斗屏均可打开）
+const helpNode = document.createElement("div");
+helpNode.className = "modal";
+helpNode.innerHTML = `<div class="modal-box"><button class="inspect-close" id="help-close">✕</button>${helpContent()}</div>`;
+document.body.appendChild(helpNode);
+helpNode.addEventListener("click", (ev) => {
+  const t = ev.target as HTMLElement;
+  if (t.id === "help-close" || t === helpNode) helpNode.classList.remove("open");
+});
+
+function toast(msg: string): void {
+  const el = document.createElement("div");
+  el.className = "float-num settle";
+  el.style.left = "50%";
+  el.style.top = "30%";
+  el.textContent = msg;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1200);
 }
 
-function targetKeys(): Set<string> {
-  // 从已渲染 DOM 读取高亮，避免重复计算
-  const keys = new Set<string>();
-  document.querySelectorAll(".targetable").forEach((el) => {
-    const heroPanel = el.closest<HTMLElement>("[data-hero]");
-    if (heroPanel) {
-      keys.add(`hero:${heroPanel.dataset.hero}`);
-      return;
+// ---------- 动画管线 ----------
+
+function floatAtSel(sel: string, text: string, cls: string): void {
+  const el = document.querySelector(sel);
+  if (!el) return;
+  const r = el.getBoundingClientRect();
+  spawnFloat(r.left + r.width / 2, r.top + 6, text, cls);
+}
+
+function spawnFloat(x: number, y: number, text: string, cls: string): void {
+  const el = document.createElement("div");
+  el.className = `float-num ${cls}`;
+  el.style.left = `${x}px`;
+  el.style.top = `${y}px`;
+  el.textContent = text;
+  document.body.appendChild(el);
+  setTimeout(() => el.remove(), 1300);
+}
+
+/** 消费引擎事件：烘焙 fx 类 → 重绘 → 飘字 → 延时清除 */
+async function drainEvents(): Promise<void> {
+  if (!state) return;
+  const events = state.events.splice(0);
+  if (events.length === 0) return;
+
+  const fx = emptyFx();
+  let breachDmg = 0;
+  let breachSide: Side = 1;
+  for (const ev of events) {
+    switch (ev.t) {
+      case "attack":
+        fx.attackUid = ev.uid;
+        break;
+      case "damage":
+        fx.hitUids.add(ev.uid);
+        break;
+      case "heal":
+        fx.healUids.add(ev.uid);
+        break;
+      case "sp":
+        fx.spUids.add(ev.uid);
+        break;
+      case "deploy":
+        fx.deployUid = ev.uid;
+        break;
+      case "settlement":
+        if (ev.breach) {
+          fx.breach = true;
+          breachDmg = ev.groundDiff + ev.skyDiff;
+          breachSide = state.players[0].role === "defense" ? 0 : 1;
+        }
+        break;
+      default:
+        break;
     }
-    const creature = el.closest<HTMLElement>("[data-creature-uid]");
-    if (creature) keys.add(`c:${creature.dataset.creatureUid}`);
-  });
-  return keys;
+  }
+
+  ui.fx = fx;
+  paint();
+
+  // 飘字（在 fx 重绘后定位）
+  for (const ev of events) {
+    switch (ev.t) {
+      case "damage":
+        floatAtSel(`[data-uid="${ev.uid}"]`, `-${ev.amount}`, ev.pure ? "pure" : "dmg");
+        if (ev.killed) floatAtSel(`[data-uid="${ev.uid}"]`, "击倒", "settle");
+        break;
+      case "heal":
+        floatAtSel(`[data-uid="${ev.uid}"]`, `+${ev.amount}`, "heal");
+        break;
+      case "sp":
+        floatAtSel(`[data-uid="${ev.uid}"]`, `+${ev.amount}⚡`, "sp");
+        break;
+      case "volcano":
+        floatAtSel(`[data-uid="${ev.uid}"]`, "🌋-6", "volcano");
+        break;
+      case "settlement":
+        if (ev.breach) floatAtSel(`[data-totalhp="${breachSide}"]`, `-${ev.groundDiff + ev.skyDiff}`, "settle");
+        else floatAtSel(`[data-totalhp="${state.players[0].role === "defense" ? 0 : 1}"]`, "守住", "heal");
+        break;
+      default:
+        break;
+    }
+  }
+
+  if (fx.breach) {
+    app.classList.add("fx-breach");
+    setTimeout(() => app.classList.remove("fx-breach"), 950);
+  }
+
+  await sleep(780);
+  ui.fx = emptyFx();
+  if (screen === "battle") paint();
 }
 
-function runAi(): void {
-  if (state.winner !== null) {
+// ---------- AI ----------
+
+async function kickAi(): Promise<void> {
+  if (!state || mode !== "ai" || aiRunning) return;
+  if (state.winner || state.active !== 1) return;
+  aiRunning = true;
+  try {
+    while (state && screen === "battle" && state.active === 1 && !state.winner) {
+      await sleep(720);
+      if (!state || screen !== "battle" || state.active !== 1 || state.winner) break;
+      applyAiStep(state, charDefs, itemDefs);
+      await drainEvents();
+      paint();
+    }
+  } finally {
+    aiRunning = false;
+  }
+}
+
+// ---------- 行动后统一处理 ----------
+
+function afterAction(err: string | null): void {
+  if (err) {
+    toast(err);
+    ui.mode = { kind: "idle" };
     paint();
     return;
   }
-  applyAiStep(state, defs);
-  paint();
-  if (state.active === 1 && state.winner === null) {
-    setTimeout(runAi, 600);
-  }
+  ui.mode = { kind: "idle" };
+  ui.inspectUid = null;
+  void (async () => {
+    await drainEvents();
+    paint();
+    void kickAi();
+  })();
 }
+
+// ---------- 道具目标查询（渲染层用） ----------
+
+setItemTargetLookup((handUid) => {
+  if (!state) return "none";
+  const viewer = mode === "ai" ? 0 : state.active;
+  const h = state.players[viewer].handItems.find((x) => x.uid === handUid);
+  return h ? itemDefs[h.itemId]?.target ?? "none" : "none";
+});
+
+function handItemId(handUid: number): ItemDef | undefined {
+  if (!state) return undefined;
+  const viewer = mode === "ai" ? 0 : state.active;
+  const h = state.players[viewer].handItems.find((x) => x.uid === handUid);
+  return h ? itemDefs[h.itemId] : undefined;
+}
+
+// ---------- 点击路由 ----------
 
 app.addEventListener("click", (ev) => {
-  const target = ev.target as HTMLElement;
+  const t = ev.target as HTMLElement;
 
-  if (target.closest("#restart")) {
-    state = createGame(CARDS, ["你", "AI"]);
-    mode = { kind: "idle" };
+  // 全局按钮
+  if (t.closest("#btn-help") || t.closest("#open-help-setup")) {
+    helpNode.classList.add("open");
+    return;
+  }
+  if (t.closest("#btn-log")) {
+    ui.logOpen = true;
+    paint();
+    return;
+  }
+  const act = t.closest<HTMLElement>("[data-act]")?.dataset.act;
+  if (act === "close-log") {
+    ui.logOpen = false;
+    paint();
+    return;
+  }
+  if (act === "close-inspect") {
+    ui.inspectUid = null;
+    paint();
+    return;
+  }
+  if (act === "cancel") {
+    ui.mode = { kind: "idle" };
+    paint();
+    return;
+  }
+  if (t.closest("#btn-again")) {
+    screen = "setup";
+    state = null;
     paint();
     return;
   }
 
-  if (target.closest("#end-turn")) {
-    endTurnAction(state);
+  // 设置屏
+  const setupBtn = t.closest<HTMLElement>("[data-setup]");
+  if (setupBtn) {
+    const v = setupBtn.dataset.setup!;
+    if (v === "ai-attack" || v === "ai-defense" || v === "duo") setup.mode = v;
+    else if (v === "normal" || v === "hard") setup.difficulty = v;
+    else if (v === "plain" || v === "volcano") setup.terrain = v;
     paint();
-    setTimeout(runAi, 600);
     return;
   }
-
-  if (state.winner !== null || state.active !== 0) return;
-  const keys = targetKeys();
-
-  // 点击空白处取消当前的选择（选目标/选攻击者）
-  if (
-    mode.kind !== "idle" &&
-    !target.closest("[data-hand-uid], [data-creature-uid], [data-hero], #end-turn")
-  ) {
-    mode = { kind: "idle" };
+  if (t.closest("#to-draft")) {
+    draft = { picks: [[], []], phase: 0, selected: [] };
+    screen = "draft";
     paint();
     return;
   }
 
-  // 目标选择阶段
-  if (mode.kind === "targetPlay") {
-    const ref = hitTarget(target.closest("[data-hero], [data-creature-uid]"));
-    if (ref && isTargetable(ref, keys)) {
-      const err = playCard(state, defs, 0, mode.handUid, ref);
-      if (err) state.log.push(`⚠ ${err}`);
-      mode = { kind: "idle" };
+  // 选人屏
+  const draftBtn = t.closest<HTMLElement>("[data-draft]");
+  if (draftBtn) {
+    const id = draftBtn.dataset.draft!;
+    if (draft.selected.includes(id)) draft.selected = draft.selected.filter((x) => x !== id);
+    else if (draft.selected.length < 8) draft.selected.push(id);
+    paint();
+    return;
+  }
+  if (t.closest("#draft-reset")) {
+    draft.selected = [];
+    paint();
+    return;
+  }
+  if (t.closest("#draft-confirm") && draft.selected.length === 8) {
+    draft.picks[draft.phase] = [...draft.selected];
+    if (setup.mode === "duo" && draft.phase === 0) {
+      draft.phase = 1;
+      draft.selected = [];
       paint();
       return;
     }
-    const again = target.closest<HTMLElement>("[data-hand-uid]");
-    if (again && Number(again.dataset.handUid) === mode.handUid) {
-      mode = { kind: "idle" }; // 再点同一张手牌取消
-      paint();
-      return;
-    }
+    startBattle();
     return;
   }
 
-  // 攻击目标阶段
-  if (mode.kind === "selectAttacker") {
-    const ref = hitTarget(target.closest("[data-hero], [data-creature-uid]"));
-    if (ref && isTargetable(ref, keys)) {
-      const err = attack(state, 0, mode.uid, ref);
-      if (err) state.log.push(`⚠ ${err}`);
-      mode = { kind: "idle" };
-      paint();
-      return;
-    }
-    const own = target.closest<HTMLElement>('[data-creature-uid][data-side="0"]');
-    if (own && Number(own.dataset.creatureUid) === mode.uid) {
-      mode = { kind: "idle" }; // 取消选择
-      paint();
-      return;
-    }
+  if (screen !== "battle" || !state) return;
+  const viewer = ui.viewer;
+  const myTurn = state.active === viewer && !state.winner && !state.passed[viewer];
+
+  // 结束回合
+  if (t.closest("#btn-pass")) {
+    if (!myTurn) return;
+    afterAction(passAction(state, charDefs, viewer));
     return;
   }
 
-  // 空闲：选手牌出牌
-  const handEl = target.closest<HTMLElement>("[data-hand-uid]");
-  if (handEl) {
-    const uid = Number(handEl.dataset.handUid);
-    const hc = state.players[0].hand.find((h) => h.uid === uid);
-    const def = hc ? defs[hc.cardId] : undefined;
-    if (!hc || !def || !isPlayable(state, 0, def)) return;
-    const effects = [...(def.battlecry ?? []), ...(def.effects ?? [])];
-    const hasTarget = effects
-      .filter(needsTarget)
-      .some((e) => legalTargets(state, 0, e).length > 0);
-    if (hasTarget) {
-      mode = { kind: "targetPlay", handUid: uid };
+  // 行动菜单（charMenu）
+  if (ui.mode.kind === "charMenu" && myTurn) {
+    const uid = ui.mode.uid;
+    if (act === "normal") {
+      ui.mode = { kind: "attack", uid };
+      paint();
+      return;
+    }
+    if (act === "burst") {
+      const c = state.players[viewer].field.find((x) => x.uid === uid);
+      const def = c ? charDefs[c.defId] : undefined;
+      if (!c || !def) return;
+      if (c.sp < c.spMax || c.skillUsed) {
+        toast(c.skillUsed ? "该角色本回合已使用过技能" : "技能点不足");
+        return;
+      }
+      if (def.burst.target === "one_enemy") {
+        ui.mode = { kind: "burst", uid };
+        paint();
+        return;
+      }
+      afterAction(useBurst(state, charDefs, viewer, uid, undefined, GOBLIN_ID));
+      return;
+    }
+    if (act === "undeploy") {
+      afterAction(undeployChar(state, viewer, uid));
+      return;
+    }
+    if (act === "inspect") {
+      ui.inspectUid = uid;
+      ui.mode = { kind: "idle" };
+      paint();
+      return;
+    }
+  }
+
+  // 场上角色点击
+  const chip = t.closest<HTMLElement>("[data-uid]");
+  if (chip) {
+    const uid = Number(chip.dataset.uid);
+    const side = Number(chip.dataset.side) as Side;
+    if (!myTurn) {
+      ui.inspectUid = uid;
+      paint();
+      return;
+    }
+    if (ui.mode.kind === "attack") {
+      afterAction(useNormalAttack(state, viewer, ui.mode.uid, { side, uid }, GOBLIN_ID));
+      return;
+    }
+    if (ui.mode.kind === "burst") {
+      afterAction(useBurst(state, charDefs, viewer, ui.mode.uid, { side, uid }, GOBLIN_ID));
+      return;
+    }
+    if (ui.mode.kind === "item") {
+      const def = handItemId(ui.mode.handUid);
+      const targetRef = { side, uid };
+      if (def && def.effects.some((e) => e.kind === "move")) {
+        ui.mode = { kind: "movePick", handUid: ui.mode.handUid, targetUid: uid };
+        paint();
+        return;
+      }
+      afterAction(playItem(state, itemDefs, viewer, ui.mode.handUid, targetRef));
+      return;
+    }
+    if (ui.mode.kind === "movePick") {
+      if (side === viewer) {
+        ui.mode = { kind: "movePick", handUid: ui.mode.handUid, targetUid: uid };
+        paint();
+      }
+      return;
+    }
+    // 空闲：我方角色 → 行动菜单；敌方角色 → 查看详情
+    if (side === viewer) {
+      ui.mode = { kind: "charMenu", uid };
     } else {
-      const err = playCard(state, defs, 0, uid);
-      if (err) state.log.push(`⚠ ${err}`);
+      ui.inspectUid = uid;
     }
     paint();
     return;
   }
 
-  // 空闲：选攻击者
-  const ownCreature = target.closest<HTMLElement>('[data-creature-uid][data-side="0"]');
-  if (ownCreature) {
-    const uid = Number(ownCreature.dataset.creatureUid);
-    const c = state.players[0].board.find((x) => x.uid === uid);
-    if (c && c.attacksLeft > 0 && c.atk > 0) {
-      mode = { kind: "selectAttacker", uid };
-      paint();
+  // 网格点击（部署 / 移动目的地）
+  const cell = t.closest<HTMLElement>("[data-row]");
+  if (cell && myTurn) {
+    const pos: CellPos = {
+      row: Number(cell.dataset.row) as 0 | 1,
+      col: Number(cell.dataset.col) as 0 | 1 | 2,
+    };
+    if (ui.mode.kind === "deploy") {
+      afterAction(deployChar(state, charDefs, viewer, ui.mode.handUid, pos));
+      return;
     }
+    if (ui.mode.kind === "movePick") {
+      afterAction(playItem(state, itemDefs, viewer, ui.mode.handUid, { side: viewer, uid: ui.mode.targetUid }, pos));
+      return;
+    }
+  }
+
+  // 手牌点击
+  const handChar = t.closest<HTMLElement>("[data-hand-char]");
+  if (handChar && myTurn && ui.mode.kind === "idle") {
+    const uid = Number(handChar.dataset.handChar);
+    const h = state.players[viewer].handChars.find((x) => x.uid === uid);
+    if (!h) return;
+    if (h.cooldown > 0) {
+      toast(`冷却中，还需 ${h.cooldown} 回合`);
+      return;
+    }
+    const def = charDefs[h.defId]!;
+    const cost = Math.floor(def.cost * (1 + 0.5 * h.deathCount));
+    if (cost > state.players[viewer].cost) {
+      toast(`部署费用不足（需 ${cost}）`);
+      return;
+    }
+    ui.mode = { kind: "deploy", handUid: uid };
+    paint();
+    return;
+  }
+  const handItem = t.closest<HTMLElement>("[data-hand-item]");
+  if (handItem && myTurn && (ui.mode.kind === "idle" || ui.mode.kind === "charMenu")) {
+    const uid = Number(handItem.dataset.handItem);
+    const def = handItemId(uid);
+    if (!def) return;
+    if (def.cost > state.players[viewer].cost) {
+      toast(`部署费用不足（需 ${def.cost}）`);
+      return;
+    }
+    if (def.target === "none") {
+      afterAction(playItem(state, itemDefs, viewer, uid, undefined));
+      return;
+    }
+    ui.mode = { kind: "item", handUid: uid };
+    paint();
+    return;
+  }
+
+  // 点击空白处取消
+  if (ui.mode.kind !== "idle" && !t.closest(".hand-card, .chip, .controls, .cell")) {
+    ui.mode = { kind: "idle" };
+    paint();
   }
 });
+
+// ---------- 开局 ----------
+
+function startBattle(): void {
+  mode = setup.mode === "duo" ? "duo" : "ai";
+  const playerRole = setup.mode === "ai-defense" ? "defense" : "attack";
+  const names: [string, string] =
+    setup.mode === "duo" ? ["进攻方（玩家1）", "防守方（玩家2）"] : ["你", "AI"];
+  const aiDeck = shuffle(CHARS.map((c) => c.id)).slice(0, 8);
+  const decks: [string[], string[]] =
+    setup.mode === "duo" ? [draft.picks[0]!, draft.picks[1]!] : setup.mode === "ai-attack" ? [draft.picks[0]!, aiDeck] : [aiDeck, draft.picks[0]!];
+  state = createGame(
+    {
+      mode: setup.mode === "duo" ? "duo" : "ai",
+      playerRole,
+      difficulty: setup.difficulty,
+      terrain: setup.terrain,
+      decks,
+      names,
+    },
+    charDefs,
+    itemDefs,
+  );
+  ui = freshUi(0);
+  screen = "battle";
+  paint();
+  void kickAi();
+}
 
 paint();

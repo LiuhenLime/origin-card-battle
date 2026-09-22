@@ -1,0 +1,112 @@
+[
+  {
+    "id": "armor",
+    "name": "防御胸甲",
+    "cost": 3,
+    "target": "own_char",
+    "effects": [{ "kind": "equip_armor" }],
+    "recycle": "on_wearer_death",
+    "text": "装备一名角色：其受到的非真实伤害 -1。装备角色死亡后洗回公共牌库。",
+    "count": 8
+  },
+  {
+    "id": "food",
+    "name": "食物",
+    "cost": 0,
+    "target": "own_char",
+    "effects": [{ "kind": "heal", "value": 3 }],
+    "recycle": "immediate",
+    "text": "治疗一名我方角色 3 点生命值。",
+    "count": 12
+  },
+  {
+    "id": "stim",
+    "name": "兴奋剂",
+    "cost": 0,
+    "target": "own_char",
+    "effects": [{ "kind": "sp", "value": 2 }],
+    "recycle": "immediate",
+    "text": "一名我方角色获得 2 点技能点。",
+    "count": 10
+  },
+  {
+    "id": "fire_flask",
+    "name": "火焰药剂",
+    "cost": 2,
+    "target": "enemy_char",
+    "effects": [{ "kind": "damage", "value": 3, "pure": true }],
+    "recycle": "consume",
+    "text": "对一名敌方角色造成 3 点真实伤害。",
+    "count": 8
+  },
+  {
+    "id": "strength_elixir",
+    "name": "巨力药剂",
+    "cost": 2,
+    "target": "own_char",
+    "effects": [{ "kind": "atk_buff", "value": 2 }],
+    "recycle": "consume",
+    "text": "一名我方角色攻击力 +2（本场）。",
+    "count": 8
+  },
+  {
+    "id": "iron_wall",
+    "name": "铁壁卷轴",
+    "cost": 2,
+    "target": "own_char",
+    "effects": [{ "kind": "def_buff", "value": 2 }],
+    "recycle": "consume",
+    "text": "一名我方角色防守值 +2（本场）。",
+    "count": 8
+  },
+  {
+    "id": "war_map",
+    "name": "战术地图",
+    "cost": 1,
+    "target": "none",
+    "effects": [{ "kind": "draw", "value": 2 }],
+    "recycle": "consume",
+    "text": "从公共牌库抽 2 张道具牌。",
+    "count": 6
+  },
+  {
+    "id": "healing_potion",
+    "name": "治疗药水",
+    "cost": 1,
+    "target": "own_char",
+    "effects": [{ "kind": "heal", "value": 5 }],
+    "recycle": "consume",
+    "text": "治疗一名我方角色 5 点生命值。",
+    "count": 6
+  },
+  {
+    "id": "teleport",
+    "name": "传送卷轴",
+    "cost": 2,
+    "target": "own_char",
+    "effects": [{ "kind": "move" }],
+    "recycle": "consume",
+    "text": "将一名我方角色移动到任意合法位置（守方地面角色移到后排即转为天空防守值）。",
+    "count": 6
+  },
+  {
+    "id": "weakness",
+    "name": "弱化药剂",
+    "cost": 2,
+    "target": "enemy_char",
+    "effects": [{ "kind": "weaken", "value": 2 }],
+    "recycle": "consume",
+    "text": "一名敌方角色攻击力 -2（最低 0）。",
+    "count": 4
+  },
+  {
+    "id": "mystery_box",
+    "name": "神秘宝箱",
+    "cost": 3,
+    "target": "none",
+    "effects": [{ "kind": "draw", "value": 3 }],
+    "recycle": "consume",
+    "text": "从公共牌库抽 3 张道具牌。",
+    "count": 4
+  }
+]
