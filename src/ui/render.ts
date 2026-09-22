@@ -121,8 +121,11 @@ function chipHtml(
   extraCls: string,
 ): string {
   const fx = ui.fx;
+  // 本回合还能行动的角色绿底；已用过技能（无法行动）红底
+  const stateCls = c.hp <= 0 ? "" : c.skillUsed ? "chip-used" : "chip-ready";
   const cls = [
     "chip",
+    stateCls,
     extraCls,
     fx.attackUid === c.uid ? "fx-attack" : "",
     fx.hitUids.has(c.uid) ? "fx-hit" : "",
@@ -267,13 +270,17 @@ function controlsHtml(s: GameState, ui: UiState, defs: Record<string, CharDef>, 
     const c = s.players[ui.viewer].field.find((x) => x.uid === selUid);
     if (c) {
       const def = defs[c.defId];
-      const canSkill = !c.skillUsed;
-      const canBurst = canSkill && c.sp >= c.spMax && def;
+      const canAct = !c.skillUsed;
+      const canBurst = canAct && c.sp >= c.spMax && def;
       const burstNeedsTarget = def?.burst.target === "one_enemy";
+      const actionButtons = canAct
+        ? `
+        <button class="act" data-act="normal">普通攻击${c.passive === "healer" ? "（治疗）" : ""}</button>
+        <button class="act burst" data-act="burst" ${canBurst ? "" : "disabled"}>大招·${def!.burst.name}${burstNeedsTarget ? "（选目标）" : ""}</button>`
+        : `<span class="hint used-hint">✓ 本回合已使用过技能，只能查看详情或下阵</span>`;
       return `
       <div class="controls menu">
-        <button class="act" data-act="normal">普通攻击${c.passive === "healer" ? "（治疗）" : ""}</button>
-        <button class="act burst" data-act="burst" ${canBurst ? "" : "disabled"}>大招·${def!.burst.name}${burstNeedsTarget ? "（选目标）" : ""}</button>
+        ${actionButtons}
         <button class="act danger" data-act="undeploy">下阵（返 ⌊${Math.floor(c.paidCost / 2)}⌋）</button>
         <button class="act ghost" data-act="inspect">详情</button>
         <button class="act ghost" data-act="cancel">取消</button>
