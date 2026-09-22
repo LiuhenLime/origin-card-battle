@@ -9,11 +9,16 @@
     "atk": 7,
     "spMax": 8,
     "domain": "sky",
-    "laneVal": 2,
-    "burst": { "name": "吐息", "target": "all_enemies", "value": 1, "text": "所有敌方角色扣除 1 点生命值。" },
+    "laneVal": 3,
+    "burst": {
+      "name": "吐息",
+      "target": "all_enemies",
+      "value": 1,
+      "text": "所有敌方角色扣除 1 点生命值。"
+    },
     "passive": "tough_skin",
     "passiveText": "皮糙肉厚：每次受到的普通攻击伤害 -1。",
-    "text": "防守方 · 天空单位。天空防守值 2。"
+    "text": "防守方 · 天空单位。天空防守值 3。"
   },
   {
     "id": "goblin",
@@ -25,11 +30,16 @@
     "atk": 5,
     "spMax": 6,
     "domain": "ground",
-    "laneVal": 1,
-    "burst": { "name": "成群", "target": "none", "addCopyToHand": true, "text": "将另一张哥布林角色牌加入手牌。" },
+    "laneVal": 2,
+    "burst": {
+      "name": "成群",
+      "target": "none",
+      "addCopyToHand": true,
+      "text": "将另一张哥布林角色牌加入手牌。"
+    },
     "passive": "pack_tactics",
     "passiveText": "结对：己方场上哥布林数量大于 1 时，攻击 +2。",
-    "text": "防守方 · 地面单位。地面防守值 1。"
+    "text": "防守方 · 地面单位。地面防守值 2。"
   },
   {
     "id": "mage",
@@ -41,11 +51,16 @@
     "atk": 6,
     "spMax": 7,
     "domain": "ground",
-    "laneVal": 2,
-    "burst": { "name": "魔法降临", "target": "self", "value": 15, "text": "获得 15 点部署费用。" },
+    "laneVal": 3,
+    "burst": {
+      "name": "魔法降临",
+      "target": "self",
+      "value": 15,
+      "text": "获得 15 点部署费用。"
+    },
     "passive": "archmage",
     "passiveText": "大魔法师：普通攻击造成真实伤害（无视被动、减伤、装备）。",
-    "text": "防守方 · 地面单位。地面防守值 2。"
+    "text": "防守方 · 地面单位。地面防守值 3。"
   },
   {
     "id": "healer",
@@ -57,12 +72,17 @@
     "atk": 5,
     "spMax": 8,
     "domain": "ground",
-    "laneVal": 2,
+    "laneVal": 3,
     "initSp": 2,
-    "burst": { "name": "治治你的", "target": "all_allies", "value": 5, "text": "治疗我方所有角色 5 点生命值。" },
+    "burst": {
+      "name": "治治你的",
+      "target": "all_allies",
+      "value": 5,
+      "text": "治疗我方所有角色 5 点生命值。"
+    },
     "passive": "healer",
     "passiveText": "治愈师：普通攻击改为治疗我方角色；初始技能点 2。",
-    "text": "防守方 · 地面单位。地面防守值 2。"
+    "text": "防守方 · 地面单位。地面防守值 3。"
   },
   {
     "id": "gargoyle",
@@ -74,11 +94,16 @@
     "atk": 4,
     "spMax": 6,
     "domain": "sky",
-    "laneVal": 3,
-    "burst": { "name": "岩翼", "target": "self", "defBuff": 2, "text": "自己的防守值永久 +2。" },
+    "laneVal": 4,
+    "burst": {
+      "name": "岩翼",
+      "target": "self",
+      "defBuff": 2,
+      "text": "自己的防守值永久 +2。"
+    },
     "passive": "stone_wing",
     "passiveText": "飞行：不会受到火山伤害。",
-    "text": "防守方 · 天空单位。天空防守值 3。"
+    "text": "防守方 · 天空单位。天空防守值 4。"
   },
   {
     "id": "orc_warrior",
@@ -90,11 +115,16 @@
     "atk": 6,
     "spMax": 6,
     "domain": "ground",
-    "laneVal": 1,
-    "burst": { "name": "狂暴", "target": "self", "atkBuff": 2, "text": "自己的攻击力永久 +2。" },
+    "laneVal": 2,
+    "burst": {
+      "name": "狂暴",
+      "target": "self",
+      "atkBuff": 2,
+      "text": "自己的攻击力永久 +2。"
+    },
     "passive": "bloodthirst",
     "passiveText": "嗜血：击杀敌人后回复 3 点生命。",
-    "text": "防守方 · 地面单位。地面防守值 1。"
+    "text": "防守方 · 地面单位。地面防守值 2。"
   },
   {
     "id": "skeleton_archer",
@@ -106,11 +136,16 @@
     "atk": 5,
     "spMax": 5,
     "domain": "ground",
-    "laneVal": 0,
-    "burst": { "name": "箭雨", "target": "all_enemies", "value": 2, "text": "所有敌方角色扣除 2 点生命值。" },
+    "laneVal": 1,
+    "burst": {
+      "name": "箭雨",
+      "target": "all_enemies",
+      "value": 2,
+      "text": "所有敌方角色扣除 2 点生命值。"
+    },
     "passive": "bones",
     "passiveText": "白骨：每回合结束回复 1 点生命。",
-    "text": "防守方 · 地面单位。地面防守值 0。"
+    "text": "防守方 · 地面单位。地面防守值 1。"
   },
   {
     "id": "wyvern",
@@ -122,11 +157,17 @@
     "atk": 8,
     "spMax": 8,
     "domain": "sky",
-    "laneVal": 2,
-    "burst": { "name": "龙息冲撞", "target": "one_enemy", "value": 6, "pure": true, "text": "对一名敌方角色造成 6 点真实伤害。" },
+    "laneVal": 3,
+    "burst": {
+      "name": "龙息冲撞",
+      "target": "one_enemy",
+      "value": 6,
+      "pure": true,
+      "text": "对一名敌方角色造成 6 点真实伤害。"
+    },
     "passive": "spikes",
     "passiveText": "尖鳞：受到的技能伤害 -1。",
-    "text": "防守方 · 天空单位。天空防守值 2。"
+    "text": "防守方 · 天空单位。天空防守值 3。"
   },
   {
     "id": "rock_turtle",
@@ -138,11 +179,16 @@
     "atk": 3,
     "spMax": 6,
     "domain": "ground",
-    "laneVal": 4,
-    "burst": { "name": "岩甲收缩", "target": "self", "defBuff": 2, "text": "自己的防守值永久 +2。" },
+    "laneVal": 6,
+    "burst": {
+      "name": "岩甲收缩",
+      "target": "self",
+      "defBuff": 2,
+      "text": "自己的防守值永久 +2。"
+    },
     "passive": "shell",
     "passiveText": "龟壳：每次受到的非真实伤害 -2。",
-    "text": "防守方 · 地面单位。地面防守值 4。"
+    "text": "防守方 · 地面单位。地面防守值 6。"
   },
   {
     "id": "shadow_assassin",
@@ -154,12 +200,17 @@
     "atk": 7,
     "spMax": 6,
     "domain": "ground",
-    "laneVal": 0,
-    "burst": { "name": "暗影突袭", "target": "one_enemy", "value": 5, "text": "对一名敌方角色造成 5 点伤害并回复自身 3 点生命。" },
+    "laneVal": 1,
+    "burst": {
+      "name": "暗影突袭",
+      "target": "one_enemy",
+      "value": 5,
+      "text": "对一名敌方角色造成 5 点伤害并回复自身 3 点生命。"
+    },
     "selfHeal": 3,
     "passive": "ambush",
     "passiveText": "潜行：攻击生命值低于自己的敌人时伤害 +2。",
-    "text": "防守方 · 地面单位。地面防守值 0。"
+    "text": "防守方 · 地面单位。地面防守值 1。"
   },
   {
     "id": "imp_soldier",
@@ -172,7 +223,12 @@
     "spMax": 4,
     "domain": "ground",
     "laneVal": 1,
-    "burst": { "name": "乱刃", "target": "one_enemy", "value": 3, "text": "对一名敌方角色造成 3 点伤害。" },
+    "burst": {
+      "name": "乱刃",
+      "target": "one_enemy",
+      "value": 3,
+      "text": "对一名敌方角色造成 3 点伤害。"
+    },
     "passive": "pack_tactics",
     "passiveText": "群聚：己方场上魔族小兵数量大于 1 时，攻击 +2。",
     "text": "进攻方 · 地面单位。地面进攻值 1。"
@@ -188,7 +244,12 @@
     "spMax": 6,
     "domain": "ground",
     "laneVal": 3,
-    "burst": { "name": "冷酷斩首", "target": "one_enemy", "value": 5, "text": "对一名敌方角色造成 5 点伤害。" },
+    "burst": {
+      "name": "冷酷斩首",
+      "target": "one_enemy",
+      "value": 5,
+      "text": "对一名敌方角色造成 5 点伤害。"
+    },
     "passive": "tough_skin",
     "passiveText": "魔铠：每次受到的普通攻击伤害 -1。",
     "text": "进攻方 · 地面单位。地面进攻值 3。"
@@ -204,7 +265,12 @@
     "spMax": 5,
     "domain": "ground",
     "laneVal": 2,
-    "burst": { "name": "双头撕咬", "target": "one_enemy", "value": 4, "text": "对一名敌方角色造成 4 点伤害。" },
+    "burst": {
+      "name": "双头撕咬",
+      "target": "one_enemy",
+      "value": 4,
+      "text": "对一名敌方角色造成 4 点伤害。"
+    },
     "passive": "execute",
     "passiveText": "斩杀：攻击生命值不高于自身上限一半的敌人时，伤害 +2。",
     "text": "进攻方 · 地面单位。地面进攻值 2。"
@@ -220,7 +286,12 @@
     "spMax": 7,
     "domain": "ground",
     "laneVal": 1,
-    "burst": { "name": "暗影箭雨", "target": "all_enemies", "value": 2, "text": "所有敌方角色扣除 2 点生命值。" },
+    "burst": {
+      "name": "暗影箭雨",
+      "target": "all_enemies",
+      "value": 2,
+      "text": "所有敌方角色扣除 2 点生命值。"
+    },
     "passive": "archmage",
     "passiveText": "暗蚀：普通攻击造成真实伤害（无视被动、减伤、装备）。",
     "text": "进攻方 · 地面单位。地面进攻值 1。"
@@ -236,7 +307,13 @@
     "spMax": 5,
     "domain": "sky",
     "laneVal": 3,
-    "burst": { "name": "鸦群俯冲", "target": "one_enemy", "value": 4, "pure": true, "text": "对一名敌方角色造成 4 点真实伤害。" },
+    "burst": {
+      "name": "鸦群俯冲",
+      "target": "one_enemy",
+      "value": 4,
+      "pure": true,
+      "text": "对一名敌方角色造成 4 点真实伤害。"
+    },
     "passive": "spikes",
     "passiveText": "黑羽：受到的技能伤害 -1。",
     "text": "进攻方 · 天空单位。天空进攻值 3。"
@@ -252,7 +329,12 @@
     "spMax": 6,
     "domain": "sky",
     "laneVal": 2,
-    "burst": { "name": "魂魄穿透", "target": "one_enemy", "value": 4, "text": "对一名敌方角色造成 4 点伤害并回复自身 3 点生命。" },
+    "burst": {
+      "name": "魂魄穿透",
+      "target": "one_enemy",
+      "value": 4,
+      "text": "对一名敌方角色造成 4 点伤害并回复自身 3 点生命。"
+    },
     "selfHeal": 3,
     "passive": "wraith",
     "passiveText": "虚体：每次受到的非真实伤害 -1。",
@@ -269,7 +351,12 @@
     "spMax": 8,
     "domain": "ground",
     "laneVal": 4,
-    "burst": { "name": "魔军冲锋", "target": "all_enemies", "value": 3, "text": "所有敌方角色扣除 3 点生命值。" },
+    "burst": {
+      "name": "魔军冲锋",
+      "target": "all_enemies",
+      "value": 3,
+      "text": "所有敌方角色扣除 3 点生命值。"
+    },
     "passive": "bloodthirst",
     "passiveText": "嗜血：击杀敌人后回复 3 点生命。",
     "text": "进攻方 · 地面单位。地面进攻值 4。"
@@ -285,7 +372,13 @@
     "spMax": 8,
     "domain": "sky",
     "laneVal": 4,
-    "burst": { "name": "龙炎吐息", "target": "one_enemy", "value": 7, "pure": true, "text": "对一名敌方角色造成 7 点真实伤害。" },
+    "burst": {
+      "name": "龙炎吐息",
+      "target": "one_enemy",
+      "value": 7,
+      "pure": true,
+      "text": "对一名敌方角色造成 7 点真实伤害。"
+    },
     "passive": "spikes",
     "passiveText": "龙鳞：受到的技能伤害 -1。",
     "text": "进攻方 · 天空单位。天空进攻值 4。"
@@ -301,7 +394,12 @@
     "spMax": 7,
     "domain": "ground",
     "laneVal": 3,
-    "burst": { "name": "深渊吞噬", "target": "one_enemy", "value": 5, "text": "对一名敌方角色造成 5 点伤害并回复自身 3 点生命。" },
+    "burst": {
+      "name": "深渊吞噬",
+      "target": "one_enemy",
+      "value": 5,
+      "text": "对一名敌方角色造成 5 点伤害并回复自身 3 点生命。"
+    },
     "selfHeal": 3,
     "passive": "bones",
     "passiveText": "再生：每回合结束回复 1 点生命。",
@@ -319,7 +417,12 @@
     "domain": "sky",
     "laneVal": 3,
     "initSp": 2,
-    "burst": { "name": "深渊洗礼", "target": "all_allies", "value": 4, "text": "治疗我方所有角色 4 点生命值。" },
+    "burst": {
+      "name": "深渊洗礼",
+      "target": "all_allies",
+      "value": 4,
+      "text": "治疗我方所有角色 4 点生命值。"
+    },
     "passive": "none",
     "passiveText": "狂热：初始技能点为 2。",
     "text": "进攻方 · 天空单位。天空进攻值 3。"
