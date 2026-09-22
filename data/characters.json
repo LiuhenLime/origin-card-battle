@@ -13,8 +13,9 @@
     "burst": {
       "name": "吐息",
       "target": "all_enemies",
-      "value": 1,
-      "text": "所有敌方角色扣除 1 点生命值。"
+      "value": 4,
+      "text": "对全体敌方角色造成 4 点真实伤害。",
+      "pure": true
     },
     "passive": "tough_skin",
     "passiveText": "皮糙肉厚：每次受到的普通攻击伤害 -1。",
