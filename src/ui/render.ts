@@ -2,7 +2,7 @@
 import type { CellPos, CharDef, FieldChar, GameState, ItemDef, Side } from "../engine/types";
 import { DIFFICULTY, volcanoBlastCells } from "../engine/types";
 import { laneTotals } from "../engine/combat";
-import { deployCostOf, isBlockedCell } from "../engine/actions";
+import { deployCostOf, elevationFor, isBlockedCell, isCellOccupied } from "../engine/actions";
 import { charArt, charThumb, itemArt } from "./art";
 
 // ---------- UI 状态 ----------
@@ -40,7 +40,6 @@ export interface UiState {
 // ---------- 开局设置屏 ----------
 
 export interface SetupChoice {
-  mode: "ai-attack" | "ai-defense" | "duo";
   difficulty: "normal" | "hard";
   terrain: "plain" | "volcano";
 }
@@ -51,13 +50,7 @@ export function renderSetup(sel: SetupChoice): string {
   return `
   <div class="screen setup">
     <h1>攻防对决</h1>
-    <p class="sub">进攻方摧毁防线 · 防守方固守回合</p>
-    <div class="setup-group">
-      <h3>对局模式</h3>
-      ${opt("ai-attack", sel.mode, "人机 · 我执进攻")}
-      ${opt("ai-defense", sel.mode, "人机 · 我执防守")}
-      ${opt("duo", sel.mode, "双人同屏")}
-    </div>
+    <p class="sub">单机防守战 · 你执防守方，AI 执进攻方</p>
     <div class="setup-group">
       <h3>难度</h3>
       ${opt("normal", sel.difficulty, "标准（总生命10 · 守10回合）")}
@@ -76,19 +69,14 @@ export function renderSetup(sel: SetupChoice): string {
 // ---------- 选人屏 ----------
 
 export interface DraftState {
-  picks: [string[], string[]];
-  phase: 0 | 1;
+  picks: string[];
   selected: string[];
 }
 
 export function renderDraft(
   ds: DraftState,
-  setup: SetupChoice,
   charDefs: Record<string, CharDef>,
 ): string {
-  const roleOf = (phase: 0 | 1) =>
-    setup.mode === "duo" ? (phase === 0 ? "进攻方" : "防守方") : setup.mode === "ai-attack" ? "进攻方" : "防守方";
-  const role = roleOf(ds.phase);
   const cards = Object.values(charDefs)
     .map((d) => {
       const picked = ds.selected.includes(d.id);
@@ -110,8 +98,8 @@ export function renderDraft(
   return `
   <div class="screen draft">
     <header class="draft-head">
-      <h2>${role} · 选择角色 <b class="${ds.selected.length === 8 ? "ok" : ""}">${ds.selected.length}/8</b></h2>
-      ${setup.mode === "duo" && ds.phase === 1 ? `<p class="sub">请把设备交给防守方玩家</p>` : ""}
+      <h2>防守方 · 选择角色 <b class="${ds.selected.length === 8 ? "ok" : ""}">${ds.selected.length}/8</b></h2>
+      <p class="sub">你将驻守高地，抵御 AI 进攻方</p>
     </header>
     <div class="draft-grid">${cards}</div>
     <footer class="draft-foot">
@@ -166,14 +154,18 @@ function cellHtml(
   defs: Record<string, CharDef>,
 ): string {
   const classes = ["cell"];
-  if (side === 1 && pos.row === 0) classes.push("highland");
+  const defenderSide = (s.players[0].role === "defense" ? 0 : 1) as Side;
+  const highland = side === defenderSide && pos.row === 0 && pos.col !== 1;
+  if (highland) classes.push("highland");
   const blocked = isBlockedCell(s, pos);
   if (blocked) classes.push("volcano");
   else if (s.terrain === "volcano" && volcanoBlastCells(side).some((b) => b.row === pos.row && b.col === pos.col))
     classes.push("blast");
+  const occupied = isCellOccupied(s, side, pos);
+  if (occupied) classes.push("occupied");
   // 部署/移动目标格只标在己方区域
   const m = ui.mode;
-  if ((m.kind === "deploy" || m.kind === "movePick") && side === ui.viewer && !blocked) {
+  if ((m.kind === "deploy" || m.kind === "movePick") && side === ui.viewer && !blocked && !occupied) {
     classes.push("deployable", "cell-active");
     if (m.kind === "deploy") {
       const handUid = m.handUid;
@@ -181,7 +173,7 @@ function cellHtml(
       const hand = p.handChars.find((h) => h.uid === handUid);
       const def = hand ? defs[hand.defId] : undefined;
       if (hand && def) {
-        const elevated = p.role === "defense" && def.domain === "ground" && pos.row === 0;
+        const elevated = elevationFor(p.role, def.domain, pos);
         if (deployCostOf(def, hand.deathCount, elevated) > p.cost) classes.push("poor");
         if (elevated) classes.push("elev-cell");
       }
@@ -192,7 +184,7 @@ function cellHtml(
   const itemNeed = mode.kind === "item" ? itemTargetOf(mode.handUid) : null;
   const label = blocked
     ? `<span class="cell-tag volcano">火山口</span>`
-    : side === 1 && pos.row === 0
+    : highland
       ? `<span class="cell-tag">高地 ×2</span>`
       : classes.includes("blast")
         ? `<span class="cell-tag blast-tag">火山带</span>`
@@ -349,12 +341,13 @@ export function renderBattle(
   itemDefs: Record<string, ItemDef>,
 ): string {
   const diff = DIFFICULTY[s.difficulty];
-  const rows: CellPos[] = [
-    { row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 },
-    { row: 1, col: 0 }, { row: 1, col: 1 }, { row: 1, col: 2 },
-  ];
+  // 底方（玩家）区域：前排（row 1，靠近中线）渲染在上，后排（row 0）在下
+  const rowsFor = (side: Side): CellPos[] =>
+    side === 1
+      ? [ { row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 }, { row: 1, col: 0 }, { row: 1, col: 1 }, { row: 1, col: 2 } ]
+      : [ { row: 1, col: 0 }, { row: 1, col: 1 }, { row: 1, col: 2 }, { row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 } ];
   const grid = (side: Side) =>
-    `<div class="grid" data-zone="${side}">${rows.map((pos) => cellHtml(s, ui, side, pos, defs)).join("")}</div>`;
+    `<div class="grid" data-zone="${side}">${rowsFor(side).map((pos) => cellHtml(s, ui, side, pos, defs)).join("")}</div>`;
 
   const inspectChar =
     ui.inspectUid !== null
@@ -426,14 +419,14 @@ export function helpContent(): string {
   return `
   <h2>玩法说明</h2>
   <div class="help-body">
-    <h3>🎯 胜利条件</h3>
-    <p><b>进攻方</b>：把防守方总生命（标准 10 / 艰难 15）扣到 0。<br><b>防守方</b>：完整守住 10 / 15 个回合。</p>
+    <h3>🎯 模式与胜利条件</h3>
+    <p><b>单机防守战</b>：你执防守方，AI 执进攻方。<br><b>防守方（你）</b>：守住总生命（标准 10 / 艰难 15），完整撑过 10 / 15 个回合即获胜。<br><b>进攻方（AI）</b>：把你的总生命扣到 0。</p>
     <h3>🔄 回合流程</h3>
-    <p>每回合双方各获得 15 部署费用（可累计）。防守方先行动，双方轮流：可先不限次使用道具牌，再选择其一——上阵角色 / 下阵角色（视为死亡进冷却，返还一半部署费）/ 使用角色技能 / 结束回合。双方都结束后结算：各抽 2 张道具牌 → 全场角色 +2 技能点 → 地形伤害 → 攻防比对。</p>
+    <p>每回合双方各获得 15 部署费用（可累计）。防守方（你）先行动，双方轮流：可先不限次使用道具牌，再选择其一——上阵角色 / 下阵角色（视为死亡进冷却，返还一半部署费）/ 使用角色技能 / 结束回合。双方都结束后结算：各抽 2 张道具牌 → 全场角色 +2 技能点 → 地形伤害 → 攻防比对。</p>
     <h3>⚔ 攻防比对</h3>
-    <p>统计进攻方地面/天空进攻值与防守方地面/天空防守值。任一线<b>进攻 &gt; 防守</b>即突破：扣除两线差值之和的总生命；两线都守住则无伤。</p>
+    <p>统计进攻方地面/天空进攻值与防守方地面/天空防守值。任一线<b>进攻 &gt; 防守</b>即被突破：扣除两线差值之和的总生命；两线都守住则无伤。</p>
     <h3>🗺 站位</h3>
-    <p>每方 2×3 区域。防守方前排除外（后排）为高地：天空角色可放任意区域；地面角色放前排提供地面防守，也可花双倍部署费上高地转为天空防守。进攻方站位不影响数值。火山地形下双方后排中间为火山口（不可部署），其上/左/右区域的角色每回合结束受 6 点真实伤害。</p>
+    <p>每方 2×3 共 6 个区域，<b>每个区域只能放置一个角色</b>。防守方拥有 2 个高地（后排两角）与 4 个地面区域：天空角色可放任意区域；地面角色放地面区域提供地面防守，也可花<b>双倍部署费</b>上高地转为天空防守。进攻方无高地概念，部署永不翻倍。火山地形下双方后排中间为火山口（不可部署），其上/左/右区域的角色每回合结束受 6 点真实伤害。</p>
     <h3>🧙 角色</h3>
     <p>属性：部署费、生命、攻击、技能点上限、地面或天空的进攻/防守值。<br>技能一（普通攻击）：按攻击力伤害敌方角色（治愈师被动改为治疗我方），不耗技能点。<br>技能二（大招）：技能点满才能释放，释放后清空。<br>被动：每角色一个，自动生效。</p>
     <h3>⚡ 技能点</h3>

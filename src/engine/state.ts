@@ -61,14 +61,13 @@ export function drawItems(s: GameState, side: Side, n: number): void {
   }
 }
 
-/** 创建一局 */
+/** 创建一局。单机：玩家（side 0）恒为防守方，AI（side 1）为进攻方，防守方先行动。 */
 export function createGame(
   config: GameConfig,
   charDefs: Record<string, CharDef>,
   itemDefs: Record<string, ItemDef>,
 ): GameState {
-  const role0: PlayerState["role"] = config.mode === "duo" ? "attack" : config.playerRole;
-  const roles: [PlayerState["role"], PlayerState["role"]] = [role0, role0 === "attack" ? "defense" : "attack"];
+  const roles: [PlayerState["role"], PlayerState["role"]] = ["defense", "attack"];
   const diff = DIFFICULTY[config.difficulty];
 
   let uid = 1;

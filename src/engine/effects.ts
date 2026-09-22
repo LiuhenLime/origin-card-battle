@@ -2,7 +2,7 @@
 import type { CellPos, FieldChar, GameState, ItemDef, Side } from "./types";
 import { damageChar, healChar } from "./combat";
 import { drawItems } from "./state";
-import { elevationFor, isBlockedCell } from "./actions";
+import { elevationFor, isBlockedCell, isCellOccupied } from "./actions";
 
 /**
  * 结算一张道具牌的效果。失败返回错误信息（调用方退还费用与手牌）。
@@ -66,6 +66,7 @@ export function applyItemEffects(
         if (!target) return "需要目标";
         if (!moveTo) return "需要选择目标位置";
         if (isBlockedCell(s, moveTo)) return "不能移动到火山口";
+        if (isCellOccupied(s, side, moveTo)) return "每个区域只能放置一个角色";
         if (moveTo.row === target.pos.row && moveTo.col === target.pos.col) return "位置未变化";
         target.pos = moveTo;
         target.elevated = elevationFor(s.players[side].role, target.domain, moveTo);

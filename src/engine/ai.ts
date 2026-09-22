@@ -2,7 +2,7 @@
 // 每次返回一个行动，由 UI 逐步执行（道具不换手、主要行动换手均由引擎保证）。
 import type { CellPos, CharDef, CharRef, GameState, ItemDef, ItemEffect } from "./types";
 import { volcanoBlastCells } from "./types";
-import { findChar, laneTotals } from "./combat";
+import { findChar } from "./combat";
 import { deployChar, deployCostOf, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./actions";
 
 const AI_SIDE = 1 as const;
@@ -70,17 +70,6 @@ function deployValue(def: CharDef, role: "attack" | "defense", need: "ground" | 
   return def.domain === (need === "ground" ? "ground" : "sky") ? laneVal * 2 + def.atk / 2 : laneVal / 2;
 }
 
-/** 敌方对某个领域的压制值 */
-function foeLaneTotal(s: GameState, lane: "ground" | "sky"): number {
-  const foe = laneTotals(s, (1 - AI_SIDE) as 0 | 1);
-  return lane === "ground" ? foe.ground : foe.sky;
-}
-
-function myLaneTotal(s: GameState, lane: "ground" | "sky"): number {
-  const me = laneTotals(s, AI_SIDE);
-  return lane === "ground" ? me.ground : me.sky;
-}
-
 /** 道具牌是否值得现在使用；返回行动描述或 null */
 function evaluateItem(
   s: GameState,
@@ -117,15 +106,6 @@ function evaluateItem(
     if (wall) return { kind: "item", handUid, target: { side: AI_SIDE, uid: wall.uid } };
     return null;
   }
-  if (want("def_buff") && me.role === "defense") {
-    const weakLane: "ground" | "sky" = myLaneTotal(s, "ground") <= foeLaneTotal(s, "ground") ? "ground" : "sky";
-    const candidates = me.field.filter(
-      (c) => c.hp > 0 && c.domain === (weakLane === "ground" ? "ground" : "sky"),
-    );
-    const best = candidates.sort((a, b) => b.defVal - a.defVal)[0];
-    if (best) return { kind: "item", handUid, target: { side: AI_SIDE, uid: best.uid } };
-    return null;
-  }
   if (want("atk_buff")) {
     const carry = [...me.field].filter((c) => c.hp > 0).sort((a, b) => b.atk - a.atk)[0];
     if (carry) return { kind: "item", handUid, target: { side: AI_SIDE, uid: carry.uid } };
@@ -137,7 +117,7 @@ function evaluateItem(
   return null;
 }
 
-/** 计算当前 AI 的下一个行动 */
+/** 计算当前 AI 的下一个行动（AI 恒为进攻方） */
 export function aiNextAction(
   s: GameState,
   charDefs: Record<string, CharDef>,
@@ -153,7 +133,7 @@ export function aiNextAction(
   const foeSide = (1 - AI_SIDE) as 0 | 1;
   const foe = s.players[foeSide];
 
-  // 1. 能击杀的攻击（优先消灭高威胁敌人）
+  // 1. 能击杀的攻击（优先消灭高威胁防守者）
   const attacker = [...me.field]
     .filter((c) => c.hp > 0 && !c.skillUsed)
     .sort((a, b) => b.atk - a.atk)[0];
@@ -165,25 +145,7 @@ export function aiNextAction(
     if (killable) return { kind: "attack", uid: attacker.uid, target: { side: foeSide, uid: killable.uid } };
   }
 
-  // 2. 防守方：防线吃紧就补防（每回合结算前都要守住两条线）
-  if (me.role === "defense") {
-    const weakGround = myLaneTotal(s, "ground") <= foeLaneTotal(s, "ground");
-    const weakSky = myLaneTotal(s, "sky") <= foeLaneTotal(s, "sky");
-    if (weakGround || weakSky) {
-      const need: "ground" | "sky" = weakGround ? "ground" : "sky";
-      const options = deployable(s, charDefs).sort(
-        (a, b) => deployValue(b.def, "defense", need) / b.cost - deployValue(a.def, "defense", need) / a.cost,
-      );
-      if (options[0]) {
-        const pos = pickCell(s);
-        if (options[0].elevated || options[0].def.domain === "sky" || pos.row === 1) {
-          return { kind: "deploy", handUid: options[0].uid, pos };
-        }
-      }
-    }
-  }
-
-  // 3. 治疗类大招（我方伤势重时优先）
+  // 2. 治疗类大招（我方伤势重时优先）
   const healer = me.field.find(
     (c) => c.hp > 0 && !c.skillUsed && c.sp >= c.spMax && charDefs[c.defId]?.burst.target === "all_allies",
   );
@@ -192,7 +154,7 @@ export function aiNextAction(
     if (missing >= 6) return { kind: "burst", uid: healer.uid };
   }
 
-  // 4. 有价值的道具牌（受每回合预算限制）
+  // 3. 有价值的道具牌（受每回合预算限制）
   if (aiItemsUsed < AI_ITEM_BUDGET) {
     for (const h of me.handItems) {
       const def = itemDefs[h.itemId];
@@ -205,7 +167,7 @@ export function aiNextAction(
     }
   }
 
-  // 5. 普通攻击：优先斩杀，其次打血最少的敌人
+  // 4. 普通攻击：优先斩杀，其次打血最少的敌人
   if (attacker) {
     const victims = [...foe.field]
       .filter((c) => c.hp > 0)
@@ -213,7 +175,7 @@ export function aiNextAction(
     if (victims[0]) return { kind: "attack", uid: attacker.uid, target: { side: foeSide, uid: victims[0].uid } };
   }
 
-  // 6. 充能满的伤害大招
+  // 5. 充能满的伤害大招
   const burster = [...me.field]
     .filter((c) => c.hp > 0 && !c.skillUsed && c.sp >= c.spMax)
     .sort((a, b) => b.atk - a.atk)[0];
@@ -234,21 +196,10 @@ export function aiNextAction(
     }
   }
 
-  // 7. 进攻方：补充进攻力量（受每回合部署预算限制）
-  if (me.role === "attack" && aiDeploysUsed < AI_DEPLOY_BUDGET) {
+  // 6. 补充进攻力量（受每回合部署预算限制），随后宣告结束
+  if (aiDeploysUsed < AI_DEPLOY_BUDGET) {
     const options = deployable(s, charDefs).sort(
       (a, b) => deployValue(b.def, "attack", "any") / b.cost - deployValue(a.def, "attack", "any") / a.cost,
-    );
-    if (options[0]) {
-      aiDeploysUsed += 1;
-      return { kind: "deploy", handUid: options[0].uid, pos: pickCell(s) };
-    }
-  }
-
-  // 8. 防守方兜底：费用充裕时继续囤防（同样受预算限制）
-  if (me.role === "defense" && me.cost >= 12 && aiDeploysUsed < AI_DEPLOY_BUDGET) {
-    const options = deployable(s, charDefs).sort(
-      (a, b) => deployValue(b.def, "defense", "any") / b.cost - deployValue(a.def, "defense", "any") / a.cost,
     );
     if (options[0]) {
       aiDeploysUsed += 1;

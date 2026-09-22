@@ -20,9 +20,17 @@ export function deployCostOf(def: CharDef, deathCount: number, elevated: boolean
   return Math.floor(c);
 }
 
-/** 守方地面角色站在后排（高地）时转为提供天空防守值 */
+/**
+ * 高地格：仅防守方拥有高地，为其后排左右两角（每方 6 区 = 2 高地 + 4 地面）。
+ * 进攻方无高地概念，部署无双倍费用惩罚。
+ */
+export function isHighlandCell(role: "attack" | "defense", pos: CellPos): boolean {
+  return role === "defense" && pos.row === 0 && pos.col !== 1;
+}
+
+/** 守方地面角色站上高地后转为提供天空防守值 */
 export function elevationFor(role: "attack" | "defense", domain: "ground" | "sky", pos: CellPos): boolean {
-  return role === "defense" && domain === "ground" && pos.row === 0;
+  return domain === "ground" && isHighlandCell(role, pos);
 }
 
 /** 火山口格（双方后排中间）不可部署 */
@@ -30,6 +38,11 @@ export function isBlockedCell(s: GameState, pos: CellPos): boolean {
   if (s.terrain !== "volcano") return false;
   const v = volcanoCell(0);
   return pos.row === v.row && pos.col === v.col;
+}
+
+/** 每个区域只能放置一个角色 */
+export function isCellOccupied(s: GameState, side: Side, pos: CellPos): boolean {
+  return s.players[side].field.some((c) => c.pos.row === pos.row && c.pos.col === pos.col);
 }
 
 /** 当前行动方校验；返回错误信息或 null */
@@ -63,6 +76,7 @@ export function deployChar(
   const def = charDefs[hand.defId];
   if (!def) return "未知角色";
   if (isBlockedCell(s, pos)) return "火山口不能部署角色";
+  if (isCellOccupied(s, side, pos)) return "每个区域只能放置一个角色";
   const elevated = elevationFor(p.role, def.domain, pos);
   const cost = deployCostOf(def, hand.deathCount, elevated);
   if (p.cost < cost) return `部署费用不足（需 ${cost}）`;

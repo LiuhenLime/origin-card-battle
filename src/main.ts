@@ -28,12 +28,11 @@ const GOBLIN_ID = "goblin";
 type Screen = "setup" | "draft" | "battle";
 
 let screen: Screen = "setup";
-let setup: SetupChoice = { mode: "ai-attack", difficulty: "normal", terrain: "plain" };
-let draft: DraftState = { picks: [[], []], phase: 0, selected: [] };
+let setup: SetupChoice = { difficulty: "normal", terrain: "plain" };
+let draft: DraftState = { picks: [], selected: [] };
 let state: GameState | null = null;
 let ui: UiState = freshUi(0);
 let aiRunning = false;
-let mode: "ai" | "duo" = "ai";
 
 const app = document.querySelector<HTMLDivElement>("#app")!;
 
@@ -58,9 +57,9 @@ function paint(): void {
   if (screen === "setup") {
     app.innerHTML = renderSetup(setup);
   } else if (screen === "draft") {
-    app.innerHTML = renderDraft(draft, setup, charDefs);
+    app.innerHTML = renderDraft(draft, charDefs);
   } else if (state) {
-    ui.viewer = mode === "ai" ? 0 : state.active;
+    ui.viewer = 0; // 单机：玩家恒为防守方
     app.innerHTML = renderBattle(state, ui, charDefs, itemDefs);
   }
 }
@@ -183,7 +182,7 @@ async function drainEvents(): Promise<void> {
 // ---------- AI ----------
 
 async function kickAi(): Promise<void> {
-  if (!state || mode !== "ai" || aiRunning) return;
+  if (!state || aiRunning) return;
   if (state.winner || state.active !== 1) return;
   aiRunning = true;
   try {
@@ -221,15 +220,13 @@ function afterAction(err: string | null): void {
 
 setItemTargetLookup((handUid) => {
   if (!state) return "none";
-  const viewer = mode === "ai" ? 0 : state.active;
-  const h = state.players[viewer].handItems.find((x) => x.uid === handUid);
+  const h = state.players[0].handItems.find((x) => x.uid === handUid);
   return h ? itemDefs[h.itemId]?.target ?? "none" : "none";
 });
 
 function handItemId(handUid: number): ItemDef | undefined {
   if (!state) return undefined;
-  const viewer = mode === "ai" ? 0 : state.active;
-  const h = state.players[viewer].handItems.find((x) => x.uid === handUid);
+  const h = state.players[0].handItems.find((x) => x.uid === handUid);
   return h ? itemDefs[h.itemId] : undefined;
 }
 
@@ -275,14 +272,13 @@ app.addEventListener("click", (ev) => {
   const setupBtn = t.closest<HTMLElement>("[data-setup]");
   if (setupBtn) {
     const v = setupBtn.dataset.setup!;
-    if (v === "ai-attack" || v === "ai-defense" || v === "duo") setup.mode = v;
-    else if (v === "normal" || v === "hard") setup.difficulty = v;
+    if (v === "normal" || v === "hard") setup.difficulty = v;
     else if (v === "plain" || v === "volcano") setup.terrain = v;
     paint();
     return;
   }
   if (t.closest("#to-draft")) {
-    draft = { picks: [[], []], phase: 0, selected: [] };
+    draft = { picks: [], selected: [] };
     screen = "draft";
     paint();
     return;
@@ -303,13 +299,7 @@ app.addEventListener("click", (ev) => {
     return;
   }
   if (t.closest("#draft-confirm") && draft.selected.length === 8) {
-    draft.picks[draft.phase] = [...draft.selected];
-    if (setup.mode === "duo" && draft.phase === 0) {
-      draft.phase = 1;
-      draft.selected = [];
-      paint();
-      return;
-    }
+    draft.picks = [...draft.selected];
     startBattle();
     return;
   }
@@ -472,20 +462,13 @@ app.addEventListener("click", (ev) => {
 // ---------- 开局 ----------
 
 function startBattle(): void {
-  mode = setup.mode === "duo" ? "duo" : "ai";
-  const playerRole = setup.mode === "ai-defense" ? "defense" : "attack";
-  const names: [string, string] =
-    setup.mode === "duo" ? ["进攻方（玩家1）", "防守方（玩家2）"] : ["你", "AI"];
+  const names: [string, string] = ["你（防守方）", "AI（进攻方）"];
   const aiDeck = shuffle(CHARS.map((c) => c.id)).slice(0, 8);
-  const decks: [string[], string[]] =
-    setup.mode === "duo" ? [draft.picks[0]!, draft.picks[1]!] : setup.mode === "ai-attack" ? [draft.picks[0]!, aiDeck] : [aiDeck, draft.picks[0]!];
   state = createGame(
     {
-      mode: setup.mode === "duo" ? "duo" : "ai",
-      playerRole,
       difficulty: setup.difficulty,
       terrain: setup.terrain,
-      decks,
+      decks: [draft.picks, aiDeck],
       names,
     },
     charDefs,
