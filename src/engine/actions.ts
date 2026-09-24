@@ -1,4 +1,4 @@
-// 玩家行动：道具牌（不换手）、上阵/下阵/技能/结束回合（换手）。规则校验集中在此，UI 与 AI 共用。
+// 玩家行动：道具牌（不换手）、上阵/下阵/技能/结束回合（换手；第 8 回合起进攻方上阵不换手）。规则校验集中在此，UI 与 AI 共用。
 import type {
   CellPos,
   CharDef,
@@ -8,7 +8,7 @@ import type {
   ItemDef,
   Side,
 } from "./types";
-import { RECYCLE_ITEM_GAIN, isValidCell, volcanoCell } from "./types";
+import { RECYCLE_ITEM_GAIN, canChainDeploy, isValidCell, volcanoCell } from "./types";
 import { damageChar, destroyChar, findChar, healChar, resolveNormalAttack } from "./combat";
 import { applyItemEffects } from "./effects";
 import { drawItems, endRoundSettlement, makeFieldChar, opponent } from "./state";
@@ -80,7 +80,7 @@ function flipActor(s: GameState): void {
   if (!s.passed[next]) s.active = next;
 }
 
-/** 上阵角色。成功后换手。 */
+/** 上阵角色。第 8 回合起进攻方部署不换手（一次行动可连续部署多位），其余成功后换手。 */
 export function deployChar(
   s: GameState,
   charDefs: Record<string, CharDef>,
@@ -113,7 +113,8 @@ export function deployChar(
   p.field.push(fc);
   s.events.push({ t: "deploy", side, uid: fc.uid, pos });
   s.log.push(`⬇ ${p.name} 部署「${def.name}」${elevated ? "（高地）" : ""}，花费 ${cost} 部署费`);
-  flipActor(s);
+  // 第 8 回合起进攻方部署不消耗行动权：保留行动权，可继续部署或执行其他行动
+  if (!canChainDeploy(p.role, s.round)) flipActor(s);
   return null;
 }
 

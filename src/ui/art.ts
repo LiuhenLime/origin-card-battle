@@ -50,9 +50,9 @@ export function itemArt(def: ItemDef): string {
     </linearGradient>
   </defs>
   <rect width="120" height="150" rx="10" fill="url(#${gid})"/>
-  <rect x="60" y="30" width="60" height="60" transform="rotate(45 60 60)" fill="hsl(${hue} 60% 55% / 0.22)"/>
-  <rect x="60" y="40" width="40" height="40" transform="rotate(45 60 60)" fill="none" stroke="hsl(${hue} 70% 70% / 0.65)" stroke-width="1.5"/>
-  <text x="60" y="76" text-anchor="middle" font-size="34" font-weight="800"
+  <rect x="24" y="27" width="72" height="72" transform="rotate(45 60 63)" fill="hsl(${hue} 60% 55% / 0.22)"/>
+  <rect x="34" y="37" width="52" height="52" transform="rotate(45 60 63)" fill="none" stroke="hsl(${hue} 70% 70% / 0.65)" stroke-width="1.5"/>
+  <text x="60" y="73" text-anchor="middle" font-size="30" font-weight="800"
     font-family="'Noto Serif SC','Microsoft YaHei',serif" fill="hsl(${hue} 85% 85%)">${glyph}</text>
   <rect x="6" y="6" width="108" height="138" rx="7" fill="none" stroke="hsl(${hue} 50% 60% / 0.45)" stroke-width="1.5"/>
 </svg>`;

@@ -2,6 +2,7 @@
 import "./ui/style.css";
 import rawChars from "../data/characters.json";
 import rawItems from "../data/items.json";
+import { MULTI_DEPLOY_FROM_ROUND } from "./engine/types";
 import type { CharDef, GameState, ItemDef, Side, CellPos } from "./engine/types";
 import { createGame } from "./engine/state";
 import { deployChar, deployCostOf, playItem, passAction, recycleItem, undeployChar, useBurst, useNormalAttack } from "./engine/actions";
@@ -158,6 +159,9 @@ async function drainEvents(): Promise<void> {
         break;
       case "volcano":
         floatAtSel(`[data-uid="${ev.uid}"]`, "🌋-6", "volcano");
+        break;
+      case "round":
+        if (ev.n === MULTI_DEPLOY_FROM_ROUND) toast(`⚠ 第 ${ev.n} 回合起：进攻方可连续部署多位角色！`);
         break;
       case "settlement":
         if (ev.breach) {

@@ -9,7 +9,7 @@ import type {
   PlayerState,
   Side,
 } from "./types";
-import { DIFFICULTY, roundIncome, volcanoBlastCells } from "./types";
+import { DIFFICULTY, MULTI_DEPLOY_FROM_ROUND, roundIncome, volcanoBlastCells } from "./types";
 import { damageChar, gainSp, healChar, laneTotals } from "./combat";
 
 /** Fisher–Yates 洗牌（返回新数组） */
@@ -224,6 +224,7 @@ export function endRoundSettlement(
     s.round = round + 1;
     s.active = defSide; // 防守方先行动
     s.events.push({ t: "round", n: s.round });
+    if (s.round === MULTI_DEPLOY_FROM_ROUND) s.log.push(`⚠ 从本回合起，进攻方一次行动可连续部署多位角色`);
     s.log.push(`── 第 ${s.round} 回合 · ${s.players[defSide].name} 先行动`);
   }
 }

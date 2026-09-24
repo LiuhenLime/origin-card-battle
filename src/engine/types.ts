@@ -37,6 +37,14 @@ export const RECYCLE_ITEM_GAIN = 3;
 /** 角色死亡后的冷却回合数 */
 export const DEATH_COOLDOWN = 4;
 
+/** 从该回合起（含），进攻方部署不再消耗行动权——一次行动可连续部署多位角色 */
+export const MULTI_DEPLOY_FROM_ROUND = 8;
+
+/** 进攻方部署后是否保留行动权（第 MULTI_DEPLOY_FROM_ROUND 回合起连续部署） */
+export function canChainDeploy(role: Role, round: number): boolean {
+  return role === "attack" && round >= MULTI_DEPLOY_FROM_ROUND;
+}
+
 /** 站位。row 0 = 后排（防守方为高地），大 row = 前排（靠近中线） */
 export interface CellPos {
   row: 0 | 1 | 2;
