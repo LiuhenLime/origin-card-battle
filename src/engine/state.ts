@@ -9,7 +9,7 @@ import type {
   PlayerState,
   Side,
 } from "./types";
-import { COST_PER_ROUND, DIFFICULTY, volcanoBlastCells } from "./types";
+import { DIFFICULTY, roundIncome, volcanoBlastCells } from "./types";
 import { damageChar, gainSp, healChar, laneTotals } from "./combat";
 
 /** Fisher–Yates 洗牌（返回新数组） */
@@ -83,7 +83,7 @@ export function createGame(
     id,
     name: config.names[id],
     role: roles[id],
-    cost: COST_PER_ROUND,
+    cost: roundIncome(roles[id], 1),
     handChars: config.decks[id].map((defId) => ({ uid: uid++, defId, cooldown: 0, deathCount: 0 })),
     handItems: [],
     field: [],
@@ -216,7 +216,7 @@ export function endRoundSettlement(
   // 8) 部署费用与新一轮（对局已结束时不再推进回合数）
   for (const side of [0, 1] as const) {
     const p = s.players[side];
-    p.cost += COST_PER_ROUND;
+    p.cost += roundIncome(p.role, round + 1); // 新一轮开始时的费用
     for (const c of p.field) c.attacked = false;
   }
   s.passed = [false, false];

@@ -8,7 +8,7 @@ import type {
   ItemDef,
   Side,
 } from "./types";
-import { COST_PER_ROUND, RECYCLE_ITEM_GAIN, isValidCell, volcanoCell } from "./types";
+import { RECYCLE_ITEM_GAIN, isValidCell, volcanoCell } from "./types";
 import { damageChar, destroyChar, findChar, healChar, resolveNormalAttack } from "./combat";
 import { applyItemEffects } from "./effects";
 import { drawItems, endRoundSettlement, makeFieldChar, opponent } from "./state";
@@ -404,6 +404,3 @@ export function passAction(
   }
   return null;
 }
-
-/** 本回合双方各获得的部署费用（供 UI 展示） */
-export const ROUND_COST = COST_PER_ROUND;

@@ -16,8 +16,20 @@ export const DIFFICULTY: Record<Difficulty, { hp: number; rounds: number }> = {
 /** 单位领域：地面 或 天空 */
 export type Domain = "ground" | "sky";
 
-/** 每回合双方各获得的部署费用 */
+/** 防守方每回合获得的部署费用（固定） */
 export const COST_PER_ROUND = 20;
+
+/**
+ * 回合开始时某方获得的部署费用：
+ * 进攻方按回合递增——第 1-5 回合 20、第 6-10 回合 30、第 11-15 回合 40；
+ * 防守方恒为 COST_PER_ROUND。
+ */
+export function roundIncome(role: Role, round: number): number {
+  if (role === "defense") return COST_PER_ROUND;
+  if (round <= 5) return 20;
+  if (round <= 10) return 30;
+  return 40;
+}
 
 /** 回收一张手牌道具洗回牌库时立即获得的部署费用 */
 export const RECYCLE_ITEM_GAIN = 3;
