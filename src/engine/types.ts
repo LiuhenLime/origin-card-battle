@@ -259,7 +259,7 @@ export interface GameConfig {
   /** 单机：玩家恒为防守方（side 0），AI 进攻方（side 1） */
   difficulty: Difficulty;
   terrain: Terrain;
-  /** 双方选定的角色牌 defId（各 8 张）；decks[0] = 玩家（防守），decks[1] = AI（进攻） */
+  /** 双方选定的角色牌 defId；decks[0] = 玩家（防守，8 张），decks[1] = AI（进攻，8 种各 2 张） */
   decks: [string[], string[]];
   names: [string, string];
 }

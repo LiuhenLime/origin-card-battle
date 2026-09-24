@@ -482,9 +482,9 @@ app.addEventListener("click", (ev) => {
 
 function startBattle(): void {
   const names: [string, string] = ["你（防守方）", "AI（进攻方）"];
-  // AI 从进攻方专属卡池随机取 8 张角色
+  // AI 从进攻方专属卡池随机取 8 种角色，每种 2 张（同名单位可并存）
   const attackIds = CHARS.filter((c) => c.faction === "attack").map((c) => c.id);
-  const aiDeck = shuffle(attackIds).slice(0, 8);
+  const aiDeck = shuffle(attackIds).slice(0, 8).flatMap((id) => [id, id]);
   state = createGame(
     {
       difficulty: setup.difficulty,
