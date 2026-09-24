@@ -1,6 +1,6 @@
 // 渲染层：把 GameState 与 UI 状态映射为 HTML。纯展示，不含规则；交互经 data-* 属性由 main.ts 路由。
 import type { CellPos, CharDef, FieldChar, GameState, ItemDef, Side } from "../engine/types";
-import { DIFFICULTY, RECYCLE_ITEM_GAIN, volcanoBlastCells } from "../engine/types";
+import { RECYCLE_ITEM_GAIN, TOTAL_ROUNDS, volcanoBlastCells } from "../engine/types";
 import { effectiveAtk, laneTotals, previewHpLoss } from "../engine/combat";
 import { deployCostOf, elevationFor, isBlockedCell, isCellOccupied } from "../engine/actions";
 import { charArt, charThumb, itemArt } from "./art";
@@ -48,7 +48,6 @@ export interface HpPreview {
 // ---------- 开局设置屏 ----------
 
 export interface SetupChoice {
-  difficulty: "normal" | "hard";
   terrain: "plain" | "volcano";
 }
 
@@ -59,11 +58,6 @@ export function renderSetup(sel: SetupChoice): string {
   <div class="screen setup">
     <h1>攻防对决</h1>
     <p class="sub">单机防守战 · 你执防守方，AI 执进攻方</p>
-    <div class="setup-group">
-      <h3>难度</h3>
-      ${opt("normal", sel.difficulty, "标准（总生命10 · 守10回合）")}
-      ${opt("hard", sel.difficulty, "艰难（总生命15 · 守15回合）")}
-    </div>
     <div class="setup-group">
       <h3>地形</h3>
       ${opt("plain", sel.terrain, "平原")}
@@ -459,7 +453,6 @@ export function renderBattle(
   defs: Record<string, CharDef>,
   itemDefs: Record<string, ItemDef>,
 ): string {
-  const diff = DIFFICULTY[s.difficulty];
   const previews = computePreviews(s, ui, defs, itemDefs);
   // 底方（玩家）区域：前排（靠近中线的大 row）渲染在上；进攻方 3×3，防守方 2×3
   const rowsFor = (side: Side): CellPos[] => {
@@ -507,7 +500,7 @@ export function renderBattle(
   return `
   <div class="app">
     <header class="topbar">
-      <span class="round-chip">第 ${s.round}/${diff.rounds} 回合</span>
+      <span class="round-chip">第 ${s.round}/${TOTAL_ROUNDS} 回合</span>
       ${laneStrip(s)}
       <button id="btn-help" class="icon-btn">玩法</button>
       <button id="btn-log" class="icon-btn">战报</button>
@@ -545,9 +538,9 @@ export function helpContent(): string {
   <h2>玩法说明</h2>
   <div class="help-body">
     <h3>🎯 模式与胜利条件</h3>
-    <p><b>单机防守战</b>：你执防守方，AI 执进攻方。<br><b>防守方（你）</b>：守住总生命（标准 10 / 艰难 15），完整撑过 10 / 15 个回合即获胜。<br><b>进攻方（AI）</b>：把你的总生命扣到 0。</p>
+    <p><b>单机防守战</b>：你执防守方，AI 执进攻方。<br><b>防守方（你）</b>：守住总生命 10，完整撑过 10 个回合即获胜。<br><b>进攻方（AI）</b>：把你的总生命扣到 0。</p>
     <h3>🔄 回合流程</h3>
-    <p>每回合开始双方获得部署费用（可累计）：防守方每回合 20；<b>进攻方按回合递增</b>——第 1-5 回合每回合 20，第 6-10 回合开始时每回合 30，第 11-15 回合开始时每回合 40。防守方先行动，双方轮流：行动方可<b>不限次数</b>使用道具牌，然后选择其一执行（执行后换对方行动）——上阵一个角色 / 下阵一个角色（视为死亡进冷却，返还一半部署费）/ 使用一个角色的<b>普通攻击</b>或<b>大招</b> / 结束回合。<b>从第 8 回合起，进攻方上阵角色不再消耗行动权</b>——一次行动可连续部署多位角色（仍受部署费用、空位与层级上限限制），直到其执行其他行动或宣告结束。<br>普通攻击每位角色每回合只能使用一次；<b>大招不受次数限制</b>，只要技能点满且轮到我方行动就能释放。双方都结束后结算：各抽 2 张道具牌 → 全场角色 +2 技能点 → 地形伤害 → 攻防比对。</p>
+    <p>每回合开始双方获得部署费用（可累计）：防守方每回合 20；<b>进攻方按回合递增</b>——第 1-5 回合每回合 20，第 6-7 回合 30，第 8 回合 40，第 9 回合 45，第 10 回合 50。防守方先行动，双方轮流：行动方可<b>不限次数</b>使用道具牌，然后选择其一执行（执行后换对方行动）——上阵一个角色 / 下阵一个角色（视为死亡进冷却，返还一半部署费）/ 使用一个角色的<b>普通攻击</b>或<b>大招</b> / 结束回合。<b>第 8 回合开始时，进攻方所有死亡冷却中的角色冷却立即清零，即刻可再上阵</b>；且<b>从第 8 回合起，进攻方上阵角色不再消耗行动权</b>——一次行动可连续部署多位角色（仍受部署费用、空位与层级上限限制），直到其执行其他行动或宣告结束。<br>普通攻击每位角色每回合只能使用一次；<b>大招不受次数限制</b>，只要技能点满且轮到我方行动就能释放。双方都结束后结算：各抽 2 张道具牌 → 全场角色 +2 技能点 → 地形伤害 → 攻防比对。</p>
     <h3>⚔ 攻防比对</h3>
     <p>统计进攻方地面/天空进攻值与防守方地面/天空防守值。任一线<b>进攻 &gt; 防守</b>即被突破：扣除两线差值之和的总生命。暗影幽灵在场上时，天空防线被视为失守并额外扣除 1 点总生命。</p>
     <h3>🗺 站位</h3>

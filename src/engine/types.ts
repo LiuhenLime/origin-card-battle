@@ -6,12 +6,10 @@ export type Side = 0 | 1;
 /** 战术角色：进攻方设法扣防守方总生命，防守方拖到回合数耗尽 */
 export type Role = "attack" | "defense";
 
-export type Difficulty = "normal" | "hard";
-/** normal：防守方总生命 10、需存活 10 回合；hard：15、15 */
-export const DIFFICULTY: Record<Difficulty, { hp: number; rounds: number }> = {
-  normal: { hp: 10, rounds: 10 },
-  hard: { hp: 15, rounds: 15 },
-};
+/** 防守方总生命（唯一模式） */
+export const DEFENDER_TOTAL_HP = 10;
+/** 防守方需完整守住的回合数 */
+export const TOTAL_ROUNDS = 10;
 
 /** 单位领域：地面 或 天空 */
 export type Domain = "ground" | "sky";
@@ -21,14 +19,16 @@ export const COST_PER_ROUND = 20;
 
 /**
  * 回合开始时某方获得的部署费用：
- * 进攻方按回合递增——第 1-5 回合 20、第 6-10 回合 30、第 11-15 回合 40；
+ * 进攻方按回合递增——第 1-5 回合 20、第 6-7 回合 30、第 8 回合 40、第 9 回合 45、第 10 回合起 50；
  * 防守方恒为 COST_PER_ROUND。
  */
 export function roundIncome(role: Role, round: number): number {
   if (role === "defense") return COST_PER_ROUND;
   if (round <= 5) return 20;
-  if (round <= 10) return 30;
-  return 40;
+  if (round <= 7) return 30;
+  if (round === 8) return 40;
+  if (round === 9) return 45;
+  return 50;
 }
 
 /** 回收一张手牌道具洗回牌库时立即获得的部署费用 */
@@ -44,6 +44,9 @@ export const MULTI_DEPLOY_FROM_ROUND = 8;
 export function canChainDeploy(role: Role, round: number): boolean {
   return role === "attack" && round >= MULTI_DEPLOY_FROM_ROUND;
 }
+
+/** 该回合开始时，进攻方手牌中所有死亡冷却立即清零（阵亡过的角色即刻可再上阵） */
+export const COOLDOWN_RESET_ROUND = 8;
 
 /** 站位。row 0 = 后排（防守方为高地），大 row = 前排（靠近中线） */
 export interface CellPos {
@@ -276,8 +279,6 @@ export type GameEvent =
   | { t: "round"; n: number };
 
 export interface GameConfig {
-  /** 单机：玩家恒为防守方（side 0），AI 进攻方（side 1） */
-  difficulty: Difficulty;
   terrain: Terrain;
   /** 双方选定的角色牌 defId；decks[0] = 玩家（防守，8 张），decks[1] = AI（进攻，8 种各 2 张） */
   decks: [string[], string[]];
@@ -292,7 +293,6 @@ export interface GameState {
   passed: [boolean, boolean];
   round: number;
   terrain: Terrain;
-  difficulty: Difficulty;
   /** 公共道具牌库 */
   itemDeck: HandItem[];
   winner: null | { side: Side | "defense"; reason: string };

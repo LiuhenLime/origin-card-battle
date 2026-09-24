@@ -9,7 +9,14 @@ import type {
   PlayerState,
   Side,
 } from "./types";
-import { DIFFICULTY, MULTI_DEPLOY_FROM_ROUND, roundIncome, volcanoBlastCells } from "./types";
+import {
+  COOLDOWN_RESET_ROUND,
+  DEFENDER_TOTAL_HP,
+  MULTI_DEPLOY_FROM_ROUND,
+  roundIncome,
+  TOTAL_ROUNDS,
+  volcanoBlastCells,
+} from "./types";
 import { damageChar, gainSp, healChar, laneTotals } from "./combat";
 
 /** Fisher–Yates 洗牌（返回新数组） */
@@ -76,7 +83,6 @@ export function createGame(
   itemDefs: Record<string, ItemDef>,
 ): GameState {
   const roles: [PlayerState["role"], PlayerState["role"]] = ["defense", "attack"];
-  const diff = DIFFICULTY[config.difficulty];
 
   let uid = 1;
   const makePlayer = (id: Side): PlayerState => ({
@@ -87,8 +93,8 @@ export function createGame(
     handChars: config.decks[id].map((defId) => ({ uid: uid++, defId, cooldown: 0, deathCount: 0 })),
     handItems: [],
     field: [],
-    totalHp: roles[id] === "defense" ? diff.hp : 0,
-    totalHpMax: roles[id] === "defense" ? diff.hp : 0,
+    totalHp: roles[id] === "defense" ? DEFENDER_TOTAL_HP : 0,
+    totalHpMax: roles[id] === "defense" ? DEFENDER_TOTAL_HP : 0,
   });
 
   const deck: HandItem[] = [];
@@ -102,7 +108,6 @@ export function createGame(
     passed: [false, false],
     round: 1,
     terrain: config.terrain,
-    difficulty: config.difficulty,
     itemDeck: shuffle(deck),
     winner: null,
     log: [],
@@ -115,7 +120,7 @@ export function createGame(
   s.log.push(
     `── 第 1 回合 · ${s.players[s.active].name}（${roles[s.active] === "attack" ? "进攻方" : "防守方"}）先行动`,
   );
-  s.log.push(`🎯 ${roles[1] === "defense" ? s.players[1].name : s.players[0].name} 需守住 ${diff.hp} 点总生命 ${diff.rounds} 回合`);
+  s.log.push(`🎯 ${roles[1] === "defense" ? s.players[1].name : s.players[0].name} 需守住 ${DEFENDER_TOTAL_HP} 点总生命 ${TOTAL_ROUNDS} 回合`);
   return s;
 }
 
@@ -189,8 +194,8 @@ export function endRoundSettlement(
   // 6) 胜负判定
   if (defender.totalHp <= 0) {
     s.winner = { side: atkSide, reason: `防守方总生命归零` };
-  } else if (round >= DIFFICULTY[s.difficulty].rounds) {
-    s.winner = { side: "defense", reason: `防守方完整守住了 ${DIFFICULTY[s.difficulty].rounds} 个回合` };
+  } else if (round >= TOTAL_ROUNDS) {
+    s.winner = { side: "defense", reason: `防守方完整守住了 ${TOTAL_ROUNDS} 个回合` };
   }
 
   // 7) 冷却递减（死亡当次结算也计入）与限时增益递减
@@ -225,6 +230,20 @@ export function endRoundSettlement(
     s.active = defSide; // 防守方先行动
     s.events.push({ t: "round", n: s.round });
     if (s.round === MULTI_DEPLOY_FROM_ROUND) s.log.push(`⚠ 从本回合起，进攻方一次行动可连续部署多位角色`);
+    if (s.round === COOLDOWN_RESET_ROUND) {
+      let cleared = 0;
+      for (const h of s.players[atkSide].handChars) {
+        if (h.cooldown > 0) {
+          h.cooldown = 0;
+          cleared++;
+        }
+      }
+      s.log.push(
+        cleared > 0
+          ? `🔥 第 ${COOLDOWN_RESET_ROUND} 回合开始：进攻方 ${cleared} 名冷却中的角色冷却清零，即刻可再上阵`
+          : `🔥 第 ${COOLDOWN_RESET_ROUND} 回合开始：进攻方死亡冷却全部清零`,
+      );
+    }
     s.log.push(`── 第 ${s.round} 回合 · ${s.players[defSide].name} 先行动`);
   }
 }

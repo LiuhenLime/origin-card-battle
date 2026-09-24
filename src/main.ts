@@ -2,7 +2,7 @@
 import "./ui/style.css";
 import rawChars from "../data/characters.json";
 import rawItems from "../data/items.json";
-import { MULTI_DEPLOY_FROM_ROUND } from "./engine/types";
+import { COOLDOWN_RESET_ROUND, MULTI_DEPLOY_FROM_ROUND } from "./engine/types";
 import type { CharDef, GameState, ItemDef, Side, CellPos } from "./engine/types";
 import { createGame } from "./engine/state";
 import { deployChar, deployCostOf, playItem, passAction, recycleItem, undeployChar, useBurst, useNormalAttack } from "./engine/actions";
@@ -28,7 +28,7 @@ const itemDefs: Record<string, ItemDef> = Object.fromEntries(ITEMS.map((i) => [i
 type Screen = "setup" | "draft" | "battle";
 
 let screen: Screen = "setup";
-let setup: SetupChoice = { difficulty: "normal", terrain: "plain" };
+let setup: SetupChoice = { terrain: "plain" };
 let draft: DraftState = { picks: [], selected: [] };
 let state: GameState | null = null;
 let ui: UiState = freshUi(0);
@@ -74,14 +74,14 @@ helpNode.addEventListener("click", (ev) => {
   if (t.id === "help-close" || t === helpNode) helpNode.classList.remove("open");
 });
 
-function toast(msg: string): void {
+function toast(msg: string, ms = 1200): void {
   const el = document.createElement("div");
   el.className = "float-num settle";
   el.style.left = "50%";
   el.style.top = "30%";
   el.textContent = msg;
   document.body.appendChild(el);
-  setTimeout(() => el.remove(), 1200);
+  setTimeout(() => el.remove(), ms);
 }
 
 // ---------- 动画管线 ----------
@@ -161,7 +161,12 @@ async function drainEvents(): Promise<void> {
         floatAtSel(`[data-uid="${ev.uid}"]`, "🌋-6", "volcano");
         break;
       case "round":
-        if (ev.n === MULTI_DEPLOY_FROM_ROUND) toast(`⚠ 第 ${ev.n} 回合起：进攻方可连续部署多位角色！`);
+        if (ev.n === MULTI_DEPLOY_FROM_ROUND || ev.n === COOLDOWN_RESET_ROUND) {
+          const parts: string[] = [];
+          if (ev.n === MULTI_DEPLOY_FROM_ROUND) parts.push("进攻方可连续部署多位角色");
+          if (ev.n === COOLDOWN_RESET_ROUND) parts.push("进攻方死亡冷却全部清零");
+          toast(`⚠ 第 ${ev.n} 回合：${parts.join("，")}！`, 3200);
+        }
         break;
       case "settlement":
         if (ev.breach) {
@@ -280,8 +285,7 @@ app.addEventListener("click", (ev) => {
   const setupBtn = t.closest<HTMLElement>("[data-setup]");
   if (setupBtn) {
     const v = setupBtn.dataset.setup!;
-    if (v === "normal" || v === "hard") setup.difficulty = v;
-    else if (v === "plain" || v === "volcano") setup.terrain = v;
+    if (v === "plain" || v === "volcano") setup.terrain = v;
     paint();
     return;
   }
@@ -491,7 +495,6 @@ function startBattle(): void {
   const aiDeck = shuffle(attackIds).slice(0, 8).flatMap((id) => [id, id]);
   state = createGame(
     {
-      difficulty: setup.difficulty,
       terrain: setup.terrain,
       decks: [draft.picks, aiDeck],
       names,
