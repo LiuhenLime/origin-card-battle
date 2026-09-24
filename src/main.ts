@@ -4,7 +4,7 @@ import rawChars from "../data/characters.json";
 import rawItems from "../data/items.json";
 import type { CharDef, GameState, ItemDef, Side, CellPos } from "./engine/types";
 import { createGame } from "./engine/state";
-import { deployChar, deployCostOf, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./engine/actions";
+import { deployChar, deployCostOf, playItem, passAction, recycleItem, undeployChar, useBurst, useNormalAttack } from "./engine/actions";
 import { applyAiStep } from "./engine/ai";
 import {
   emptyFx,
@@ -319,6 +319,9 @@ app.addEventListener("click", (ev) => {
     return;
   }
 
+  // 道具菜单打开时，点击场上角色/格子不改变状态（只能选菜单或换选手牌道具）
+  if (ui.mode.kind === "itemMenu" && t.closest(".chip, .cell")) return;
+
   // 行动菜单（charMenu）
   if (ui.mode.kind === "charMenu" && myTurn) {
     const uid = ui.mode.uid;
@@ -351,6 +354,26 @@ app.addEventListener("click", (ev) => {
       ui.inspectUid = uid;
       ui.mode = { kind: "idle" };
       paint();
+      return;
+    }
+  }
+
+  // 道具菜单（itemMenu）：使用或回收
+  if (ui.mode.kind === "itemMenu" && myTurn) {
+    if (act === "use-item") {
+      const def = handItemId(ui.mode.handUid);
+      if (!def) return;
+      if (def.cost > state.players[viewer].cost) return;
+      if (def.target === "none") {
+        afterAction(playItem(state, itemDefs, viewer, ui.mode.handUid, undefined));
+        return;
+      }
+      ui.mode = { kind: "item", handUid: ui.mode.handUid };
+      paint();
+      return;
+    }
+    if (act === "recycle-item") {
+      afterAction(recycleItem(state, itemDefs, viewer, ui.mode.handUid));
       return;
     }
   }
@@ -439,19 +462,11 @@ app.addEventListener("click", (ev) => {
     return;
   }
   const handItem = t.closest<HTMLElement>("[data-hand-item]");
-  if (handItem && myTurn && (ui.mode.kind === "idle" || ui.mode.kind === "charMenu")) {
+  if (handItem && myTurn && (ui.mode.kind === "idle" || ui.mode.kind === "charMenu" || ui.mode.kind === "itemMenu")) {
     const uid = Number(handItem.dataset.handItem);
     const def = handItemId(uid);
     if (!def) return;
-    if (def.cost > state.players[viewer].cost) {
-      toast(`部署费用不足（需 ${def.cost}）`);
-      return;
-    }
-    if (def.target === "none") {
-      afterAction(playItem(state, itemDefs, viewer, uid, undefined));
-      return;
-    }
-    ui.mode = { kind: "item", handUid: uid };
+    ui.mode = { kind: "itemMenu", handUid: uid };
     paint();
     return;
   }

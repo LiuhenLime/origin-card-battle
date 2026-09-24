@@ -1,6 +1,6 @@
 // 渲染层：把 GameState 与 UI 状态映射为 HTML。纯展示，不含规则；交互经 data-* 属性由 main.ts 路由。
 import type { CellPos, CharDef, FieldChar, GameState, ItemDef, Side } from "../engine/types";
-import { DIFFICULTY, volcanoBlastCells } from "../engine/types";
+import { DIFFICULTY, RECYCLE_ITEM_GAIN, volcanoBlastCells } from "../engine/types";
 import { effectiveAtk, laneTotals, previewHpLoss } from "../engine/combat";
 import { deployCostOf, elevationFor, isBlockedCell, isCellOccupied } from "../engine/actions";
 import { charArt, charThumb, itemArt } from "./art";
@@ -13,6 +13,7 @@ export type UiMode =
   | { kind: "deploy"; handUid: number }
   | { kind: "attack"; uid: number }
   | { kind: "burst"; uid: number }
+  | { kind: "itemMenu"; handUid: number }
   | { kind: "item"; handUid: number }
   | { kind: "movePick"; handUid: number; targetUid: number };
 
@@ -376,6 +377,21 @@ function controlsHtml(s: GameState, ui: UiState, defs: Record<string, CharDef>, 
       </div>`;
     }
   }
+  if (ui.mode.kind === "itemMenu") {
+    const m = ui.mode;
+    const h = p.handItems.find((x) => x.uid === m.handUid);
+    const def = h ? itemDefs[h.itemId] : undefined;
+    if (def) {
+      const canUse = def.cost <= p.cost;
+      const targetHint = def.target === "none" ? "" : def.effects.some((e) => e.kind === "move") ? "（选角色和位置）" : "（选目标）";
+      return `
+      <div class="controls menu">
+        <button class="act" data-act="use-item" ${canUse ? "" : "disabled"} title="${def.text}">使用·${def.name}${targetHint}${canUse ? "" : `（需 ${def.cost}💰）`}</button>
+        <button class="act" data-act="recycle-item">回收（+${RECYCLE_ITEM_GAIN}💰）</button>
+        <button class="act ghost" data-act="cancel">取消</button>
+      </div>`;
+    }
+  }
   if (ui.mode.kind === "deploy" || ui.mode.kind === "attack" || ui.mode.kind === "burst" || ui.mode.kind === "item" || ui.mode.kind === "movePick") {
     const itemHint =
       ui.mode.kind === "item"
@@ -542,7 +558,7 @@ export function helpContent(): string {
     <h3>☠ 死亡与冷却</h3>
     <p>角色死亡后冷却 4 个完整回合回到手牌；再次上阵费用 = 原费用 ×(1 + 0.5×死亡次数)，<b>最高不超过原费用的两倍</b>。</p>
     <h3>🃏 道具牌</h3>
-    <p>公共牌库首回合各抽 5 张、每回合结束各抽 2 张。使用消耗部署费用，每回合不限次数；用后是否洗回依牌面说明。</p>
+    <p>公共牌库首回合各抽 5 张、每回合结束各抽 2 张。使用消耗部署费用，每回合不限次数；点击手牌道具可「使用」或「回收」——<b>回收将道具洗回公共牌库并立即获得 3 点部署费用</b>（不消耗行动权）。用后的洗回方式依牌面说明。</p>
     <h3>💡 提示</h3>
     <p>点击场上角色查看详情；点击我方角色打开行动菜单；点击手牌角色进入部署，点击手牌道具选择目标。<b>指定攻击/治疗/大招/道具目标时，所有可选对象的血条会闪烁预演</b>即将发生的变化（含减伤结算后的真实损失）。真实伤害无视被动、减伤、装备与护盾。</p>
   </div>`;

@@ -19,6 +19,9 @@ export type Domain = "ground" | "sky";
 /** 每回合双方各获得的部署费用 */
 export const COST_PER_ROUND = 20;
 
+/** 回收一张手牌道具洗回牌库时立即获得的部署费用 */
+export const RECYCLE_ITEM_GAIN = 3;
+
 /** 角色死亡后的冷却回合数 */
 export const DEATH_COOLDOWN = 4;
 

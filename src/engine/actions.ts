@@ -8,7 +8,7 @@ import type {
   ItemDef,
   Side,
 } from "./types";
-import { COST_PER_ROUND, isValidCell, volcanoCell } from "./types";
+import { COST_PER_ROUND, RECYCLE_ITEM_GAIN, isValidCell, volcanoCell } from "./types";
 import { damageChar, destroyChar, findChar, healChar, resolveNormalAttack } from "./combat";
 import { applyItemEffects } from "./effects";
 import { drawItems, endRoundSettlement, makeFieldChar, opponent } from "./state";
@@ -360,6 +360,30 @@ export function playItem(
     s.itemDeck.push({ uid: s.nextUid++, itemId: def.id });
     s.log.push(`♻ 「${def.name}」洗回了公共牌库`);
   }
+  return null;
+}
+
+/**
+ * 回收一张手牌道具：洗回公共牌库随机位置，立即获得部署费用。
+ * 与使用道具一样不消耗行动权、不换手。
+ */
+export function recycleItem(
+  s: GameState,
+  itemDefs: Record<string, ItemDef>,
+  side: Side,
+  handUid: number,
+): string | null {
+  const err = actorError(s, side);
+  if (err) return err;
+  const p = s.players[side];
+  const idx = p.handItems.findIndex((h) => h.uid === handUid);
+  if (idx < 0) return "手牌中不存在该道具";
+  const [card] = p.handItems.splice(idx, 1);
+  const name = itemDefs[card!.itemId]?.name ?? card!.itemId;
+  const pos = Math.floor(Math.random() * (s.itemDeck.length + 1)); // 洗入随机位置
+  s.itemDeck.splice(pos, 0, { uid: s.nextUid++, itemId: card!.itemId });
+  p.cost += RECYCLE_ITEM_GAIN;
+  s.log.push(`♻ ${p.name} 回收「${name}」洗回公共牌库，获得 ${RECYCLE_ITEM_GAIN} 部署费`);
   return null;
 }
 
