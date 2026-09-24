@@ -263,8 +263,8 @@ export function useBurst(
       }
       if (burst.tempAtk) {
         c.atk += burst.tempAtk.value;
-        c.tempAtk = burst.tempAtk.value;
-        c.tempAtkTurns = burst.tempAtk.turns;
+        c.tempAtk += burst.tempAtk.value; // 累加：加成未过期时再次释放，过期时须全额回收
+        c.tempAtkTurns = Math.max(c.tempAtkTurns, burst.tempAtk.turns);
         s.log.push(`🗡 「${c.name}」攻击力 +${burst.tempAtk.value}（${c.atk}），持续 ${burst.tempAtk.turns} 回合`);
       }
       if (burst.ghostVeil) {

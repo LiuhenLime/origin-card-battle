@@ -180,6 +180,7 @@ button { font-family: inherit; }
   color: #fff; text-shadow: 0 1px 2px rgb(0 0 0 / 80%); white-space: nowrap;
 }
 .badge.shield { background: #1f3a2d; color: #9ad8ae; }
+.badge.buff { background: #3a2d1f; color: #e0b48a; }
 .chip-row { display: flex; gap: 6px; font-size: 11px; align-items: baseline; }
 .chip-atk { color: var(--ground); font-weight: 700; }
 .chip-def { color: var(--sky); }

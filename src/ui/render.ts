@@ -213,6 +213,7 @@ function chipHtml(
     hpText = `${Math.max(0, c.hp)}→${preview.after}`;
   }
   const shieldHtml = c.shield > 0 ? ` <i class="badge shield">🐢${c.shield}</i>` : "";
+  const tempAtkHtml = c.tempAtkTurns > 0 ? ` <i class="badge buff">🗡+${c.tempAtk}·${c.tempAtkTurns}回合</i>` : "";
   const orbs = Array.from({ length: c.spMax }, (_, i) => (i < c.sp ? "●" : "○")).join("");
   const laneTag = c.elevated || c.domain === "sky" ? "天" : "地";
   const isAttacker = ownerRole === "attack";
@@ -223,7 +224,7 @@ function chipHtml(
   <div class="${cls}" data-uid="${c.uid}" data-side="${c.owner}" data-domain="${c.domain}">
     <div class="chip-art">${charThumb(c.defId, c.name)}</div>
     <div class="chip-body">
-      <div class="chip-name">${c.name}${c.elevated ? ' <i class="badge elev">高地</i>' : ""}${c.equipment ? ' <i class="badge eq">🛡</i>' : ""}${shieldHtml}</div>
+      <div class="chip-name">${c.name}${c.elevated ? ' <i class="badge elev">高地</i>' : ""}${c.equipment ? ' <i class="badge eq">🛡</i>' : ""}${shieldHtml}${tempAtkHtml}</div>
       <div class="chip-hp"><i style="width:${hpPct}%"></i>${previewSeg}<span>${hpText}</span></div>
       <div class="chip-row"><span class="chip-atk">⚔${c.atk}</span>${laneHtml}<span class="chip-orbs">${orbs}</span></div>
     </div>
@@ -488,7 +489,7 @@ export function renderBattle(
           <p>${lane}${s.players[inspectChar.owner].role === "attack" ? "进攻值 " : "防守值 "}${inspectChar.laneVal}${inspectChar.elevated ? "（计入天空防守）" : ""}</p>
           <p>被动 ✦ ${inspectChar.passiveText}</p>
           <p>大招 🌟 ${def.burst.name}：${def.burst.text}</p>
-          <p>${inspectChar.attacked ? "本回合已普通攻击" : "本回合尚未普通攻击"}${inspectChar.equipment ? " · 已装备 🛡 防御胸甲" : ""}</p>`;
+          <p>${inspectChar.attacked ? "本回合已普通攻击" : "本回合尚未普通攻击"}${inspectChar.equipment ? " · 已装备 🛡 防御胸甲" : ""}${inspectChar.tempAtkTurns > 0 ? ` · 突袭加成 +${inspectChar.tempAtk}（剩 ${inspectChar.tempAtkTurns} 回合）` : ""}</p>`;
         })()}
       </div>`
     : "";
