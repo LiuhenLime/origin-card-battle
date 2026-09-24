@@ -56,8 +56,8 @@
     "target": "own_char",
     "effects": [{ "kind": "def_buff", "value": 2 }],
     "recycle": "consume",
-    "text": "一名我方角色防守值 +2（本场）。",
-    "count": 8
+    "text": "装备给防守方角色：防守值 +2；装备给进攻方角色：进攻值 +2（本场）。",
+    "count": 4
   },
   {
     "id": "war_map",
@@ -67,7 +67,7 @@
     "effects": [{ "kind": "draw", "value": 2 }],
     "recycle": "consume",
     "text": "从公共牌库抽 2 张道具牌。",
-    "count": 6
+    "count": 8
   },
   {
     "id": "healing_potion",
@@ -77,7 +77,7 @@
     "effects": [{ "kind": "heal", "value": 5 }],
     "recycle": "consume",
     "text": "治疗一名我方角色 5 点生命值。",
-    "count": 6
+    "count": 10
   },
   {
     "id": "teleport",
@@ -87,7 +87,7 @@
     "effects": [{ "kind": "move" }],
     "recycle": "consume",
     "text": "将一名我方角色移动到任意合法位置（守方地面角色移到后排即转为天空防守值）。",
-    "count": 6
+    "count": 4
   },
   {
     "id": "weakness",

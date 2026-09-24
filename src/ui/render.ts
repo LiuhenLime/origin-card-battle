@@ -1,7 +1,7 @@
 // 渲染层：把 GameState 与 UI 状态映射为 HTML。纯展示，不含规则；交互经 data-* 属性由 main.ts 路由。
 import type { CellPos, CharDef, FieldChar, GameState, ItemDef, Side } from "../engine/types";
 import { DIFFICULTY, volcanoBlastCells } from "../engine/types";
-import { laneTotals } from "../engine/combat";
+import { effectiveAtk, laneTotals, previewHpLoss } from "../engine/combat";
 import { deployCostOf, elevationFor, isBlockedCell, isCellOccupied } from "../engine/actions";
 import { charArt, charThumb, itemArt } from "./art";
 
@@ -35,6 +35,13 @@ export interface UiState {
   viewer: Side;
   logOpen: boolean;
   inspectUid: number | null;
+}
+
+/** 血条预演：目标若被当前指定行为命中，血条将如何变化 */
+export interface HpPreview {
+  kind: "dmg" | "heal";
+  value: number;
+  after: number;
 }
 
 // ---------- 开局设置屏 ----------
@@ -110,21 +117,79 @@ export function renderDraft(
   </div>`;
 }
 
-// ---------- 战斗屏 ----------
+// ---------- 血条预演 ----------
 
-function posKey(pos: CellPos): string {
-  return `${pos.row}-${pos.col}`;
+/**
+ * 计算当前指定行为下，每个可选目标血条的变化预演。
+ * 普攻/大招/道具指向前，所有合法目标的血条都会闪烁显示预计变化。
+ */
+function computePreviews(
+  s: GameState,
+  ui: UiState,
+  defs: Record<string, CharDef>,
+  itemDefs: Record<string, ItemDef>,
+): Map<number, HpPreview> {
+  const map = new Map<number, HpPreview>();
+  const m = ui.mode;
+  const me = s.players[ui.viewer];
+  const foeSide = (1 - ui.viewer) as Side;
+  const foe = s.players[foeSide];
+  const setDmg = (c: FieldChar, loss: number) => {
+    if (loss > 0) map.set(c.uid, { kind: "dmg", value: loss, after: Math.max(0, c.hp - loss) });
+  };
+  const setHeal = (c: FieldChar, value: number) => {
+    const real = Math.min(value, c.maxHp - c.hp);
+    if (real > 0) map.set(c.uid, { kind: "heal", value: real, after: c.hp + real });
+  };
+
+  if (m.kind === "attack") {
+    const a = me.field.find((c) => c.uid === m.uid);
+    if (!a) return map;
+    if (a.passive === "healer") {
+      for (const t of me.field) setHeal(t, 8);
+    } else {
+      const atk = effectiveAtk(s, a);
+      const hits = a.passive === "triple_head"
+        ? [1, 1, 1].map(() => Math.max(1, atk))
+        : [atk];
+      for (const t of foe.field) setDmg(t, previewHpLoss(t, hits, false));
+    }
+  } else if (m.kind === "burst") {
+    const c = me.field.find((x) => x.uid === m.uid);
+    const burst = c ? defs[c.defId]?.burst : undefined;
+    if (!burst) return map;
+    if (burst.target === "all_enemies" || burst.target === "one_enemy") {
+      for (const t of foe.field) setDmg(t, previewHpLoss(t, [burst.value ?? 0], burst.pure === true));
+    } else if (burst.target === "all_allies") {
+      for (const t of me.field) setHeal(t, burst.value ?? 0);
+    }
+  } else if (m.kind === "item") {
+    const h = me.handItems.find((x) => x.uid === m.handUid);
+    const def = h ? itemDefs[h.itemId] : undefined;
+    if (!def) return map;
+    for (const e of def.effects) {
+      if (e.kind === "damage") {
+        for (const t of foe.field) setDmg(t, previewHpLoss(t, [e.value], e.pure === true));
+      } else if (e.kind === "heal") {
+        for (const t of me.field) setHeal(t, e.value);
+      }
+    }
+  }
+  return map;
 }
+
+// ---------- 战斗屏 ----------
 
 function chipHtml(
   c: FieldChar,
   ui: UiState,
   extraCls: string,
   ownerRole: "attack" | "defense",
+  preview?: HpPreview,
 ): string {
   const fx = ui.fx;
-  // 本回合还能行动的角色绿底；已用过技能（无法行动）红底
-  const stateCls = c.hp <= 0 ? "" : c.skillUsed ? "chip-used" : "chip-ready";
+  // 本回合还没普攻的角色绿底；已普攻（本回合只能放大招/下阵）红底
+  const stateCls = c.hp <= 0 ? "" : c.attacked ? "chip-used" : "chip-ready";
   const cls = [
     "chip",
     stateCls,
@@ -138,6 +203,15 @@ function chipHtml(
     .filter(Boolean)
     .join(" ");
   const hpPct = Math.max(0, Math.round((c.hp / c.maxHp) * 100));
+  let previewSeg = "";
+  let hpText = `${Math.max(0, c.hp)}/${c.maxHp}`;
+  if (preview && preview.value > 0) {
+    const fromPct = preview.kind === "dmg" ? Math.max(0, (preview.after / c.maxHp) * 100) : (c.hp / c.maxHp) * 100;
+    const widthPct = (preview.value / c.maxHp) * 100;
+    previewSeg = `<b class="hp-preview ${preview.kind}" style="left:${fromPct}%;width:${widthPct}%"></b>`;
+    hpText = `${Math.max(0, c.hp)}→${preview.after}`;
+  }
+  const shieldHtml = c.shield > 0 ? ` <i class="badge shield">🐢${c.shield}</i>` : "";
   const orbs = Array.from({ length: c.spMax }, (_, i) => (i < c.sp ? "●" : "○")).join("");
   const laneTag = c.elevated || c.domain === "sky" ? "天" : "地";
   const isAttacker = ownerRole === "attack";
@@ -148,8 +222,8 @@ function chipHtml(
   <div class="${cls}" data-uid="${c.uid}" data-side="${c.owner}" data-domain="${c.domain}">
     <div class="chip-art">${charThumb(c.defId, c.name)}</div>
     <div class="chip-body">
-      <div class="chip-name">${c.name}${c.elevated ? ' <i class="badge elev">高地</i>' : ""}${c.equipment ? ' <i class="badge eq">🛡</i>' : ""}</div>
-      <div class="chip-hp"><i style="width:${hpPct}%"></i><span>${Math.max(0, c.hp)}/${c.maxHp}</span></div>
+      <div class="chip-name">${c.name}${c.elevated ? ' <i class="badge elev">高地</i>' : ""}${c.equipment ? ' <i class="badge eq">🛡</i>' : ""}${shieldHtml}</div>
+      <div class="chip-hp"><i style="width:${hpPct}%"></i>${previewSeg}<span>${hpText}</span></div>
       <div class="chip-row"><span class="chip-atk">⚔${c.atk}</span>${laneHtml}<span class="chip-orbs">${orbs}</span></div>
     </div>
   </div>`;
@@ -161,6 +235,7 @@ function cellHtml(
   side: Side,
   pos: CellPos,
   defs: Record<string, CharDef>,
+  previews: Map<number, HpPreview>,
 ): string {
   const classes = ["cell"];
   const defenderSide = (s.players[0].role === "defense" ? 0 : 1) as Side;
@@ -191,6 +266,9 @@ function cellHtml(
   const chars = s.players[side].field.filter((c) => c.pos.row === pos.row && c.pos.col === pos.col);
   const mode = ui.mode;
   const itemNeed = mode.kind === "item" ? itemTargetOf(mode.handUid) : null;
+  // 普攻目标侧：疗养师治疗我方，其余攻击敌方
+  const attacker = mode.kind === "attack" ? s.players[ui.viewer].field.find((c) => c.uid === mode.uid) : undefined;
+  const attackTargetsOwn = attacker?.passive === "healer";
   const label = blocked
     ? `<span class="cell-tag volcano">火山口</span>`
     : highland
@@ -206,11 +284,12 @@ function cellHtml(
         (mode.kind === "charMenu" && mode.uid === c.uid) ||
         ((mode.kind === "attack" || mode.kind === "burst") && mode.uid === c.uid);
       const targetable =
-        ((mode.kind === "attack" || mode.kind === "burst") && c.owner !== ui.viewer) ||
+        (mode.kind === "attack" && (attackTargetsOwn ? c.owner === ui.viewer : c.owner !== ui.viewer)) ||
+        (mode.kind === "burst" && c.owner !== ui.viewer) ||
         (mode.kind === "item" && (itemNeed === "own_char" ? c.owner === ui.viewer : c.owner !== ui.viewer)) ||
         (mode.kind === "movePick" && c.owner === ui.viewer);
       const cls = [selected ? "selected" : "", targetable ? "targetable" : ""].filter(Boolean).join(" ");
-      return chipHtml(c, ui, cls, s.players[side].role);
+      return chipHtml(c, ui, cls, s.players[side].role, previews.get(c.uid));
     }).join("")}</div>
   </div>`;
 }
@@ -276,17 +355,21 @@ function controlsHtml(s: GameState, ui: UiState, defs: Record<string, CharDef>, 
     const c = s.players[ui.viewer].field.find((x) => x.uid === selUid);
     if (c) {
       const def = defs[c.defId];
-      const canAct = !c.skillUsed;
-      const canBurst = canAct && c.sp >= c.spMax && def;
+      const canAtk = !c.attacked;
+      const canBurst = !!def && c.sp >= c.spMax;
       const burstNeedsTarget = def?.burst.target === "one_enemy";
-      const actionButtons = canAct
-        ? `
-        <button class="act" data-act="normal">普通攻击${c.passive === "healer" ? "（治疗）" : ""}</button>
-        <button class="act burst" data-act="burst" ${canBurst ? "" : "disabled"}>大招·${def!.burst.name}${burstNeedsTarget ? "（选目标）" : ""}</button>`
-        : `<span class="hint used-hint">✓ 本回合已使用过技能，只能查看详情或下阵</span>`;
+      const normalBtn = canAtk
+        ? `<button class="act" data-act="normal">普通攻击${c.passive === "healer" ? "（治疗）" : ""}</button>`
+        : `<button class="act" disabled title="每回合每位角色只能普通攻击一次">已普攻</button>`;
+      const burstBtn = canBurst
+        ? `<button class="act burst" data-act="burst">大招·${def!.burst.name}${burstNeedsTarget ? "（选目标）" : ""}</button>`
+        : `<button class="act burst" disabled title="技能点未满">大招·${def!.burst.name}（${c.sp}/${c.spMax}）</button>`;
+      const hint = !canAtk && !canBurst ? `<span class="hint used-hint">✓ 本回合已普通攻击，只能查看详情或下阵</span>` : "";
       return `
       <div class="controls menu">
-        ${actionButtons}
+        ${normalBtn}
+        ${burstBtn}
+        ${hint}
         <button class="act danger" data-act="undeploy">下阵（返 ⌊${Math.floor(c.paidCost / 2)}⌋）</button>
         <button class="act ghost" data-act="inspect">详情</button>
         <button class="act ghost" data-act="cancel">取消</button>
@@ -300,8 +383,8 @@ function controlsHtml(s: GameState, ui: UiState, defs: Record<string, CharDef>, 
         : "";
     const hints: Record<string, string> = {
       deploy: "点击格子上阵（高地双倍费用）",
-      attack: "点击敌方角色进行攻击",
-      burst: "点击敌方角色释放大招",
+      attack: "点击目标进行攻击（血条会预演变化）",
+      burst: "点击敌方角色释放大招（血条会预演变化）",
       item: itemHint,
       movePick: "点击要移动的我方角色",
     };
@@ -317,15 +400,21 @@ function handItemName(s: GameState, side: Side, uid: number, itemDefs: Record<st
 
 function laneStrip(s: GameState): string {
   const atkSide = (s.players[0].role === "attack" ? 0 : 1) as Side;
+  const defSide = (1 - atkSide) as Side;
   const atk = laneTotals(s, atkSide);
-  const def = laneTotals(s, (1 - atkSide) as Side);
+  const def = laneTotals(s, defSide);
+  const ghostBreach = s.players[atkSide].field.some((c) => c.passive === "nightmare" && c.hp > 0);
   const gBreach = atk.ground > def.ground;
-  const sBreach = atk.sky > def.sky;
-  const verdict = gBreach || sBreach ? (gBreach && sBreach ? "双线告破" : gBreach ? "地面告破" : "天空告破") : "防线稳固";
+  const sBreach = atk.sky > def.sky || ghostBreach;
+  const verdict = gBreach || sBreach
+    ? gBreach && sBreach ? "双线告破" : gBreach ? "地面告破" : ghostBreach ? "👻天空失守" : "天空告破"
+    : "防线稳固";
+  const ghostNote = ghostBreach ? `<span class="lane ghost-note" title="暗影幽灵在场：天空防线视为失守，结算时额外扣 1 点总生命">👻-1</span>` : "";
   return `
   <div class="lane-strip">
     <span class="lane ${gBreach ? "breach" : ""}">地 ${atk.ground} : ${def.ground}</span>
     <span class="lane ${sBreach ? "breach" : ""}">天 ${atk.sky} : ${def.sky}</span>
+    ${ghostNote}
     <span class="verdict ${gBreach || sBreach ? "bad" : "good"}">${verdict}</span>
   </div>`;
 }
@@ -354,13 +443,18 @@ export function renderBattle(
   itemDefs: Record<string, ItemDef>,
 ): string {
   const diff = DIFFICULTY[s.difficulty];
-  // 底方（玩家）区域：前排（row 1，靠近中线）渲染在上，后排（row 0）在下
-  const rowsFor = (side: Side): CellPos[] =>
-    side === 1
-      ? [ { row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 }, { row: 1, col: 0 }, { row: 1, col: 1 }, { row: 1, col: 2 } ]
-      : [ { row: 1, col: 0 }, { row: 1, col: 1 }, { row: 1, col: 2 }, { row: 0, col: 0 }, { row: 0, col: 1 }, { row: 0, col: 2 } ];
+  const previews = computePreviews(s, ui, defs, itemDefs);
+  // 底方（玩家）区域：前排（靠近中线的大 row）渲染在上；进攻方 3×3，防守方 2×3
+  const rowsFor = (side: Side): CellPos[] => {
+    const rows = s.players[side].role === "attack" ? 3 : 2;
+    const ordered: CellPos[] = [];
+    for (let r = rows - 1; r >= 0; r--) {
+      for (let c = 0; c < 3; c++) ordered.push({ row: r as 0 | 1 | 2, col: c as 0 | 1 | 2 });
+    }
+    return ordered;
+  };
   const grid = (side: Side) =>
-    `<div class="grid" data-zone="${side}">${rowsFor(side).map((pos) => cellHtml(s, ui, side, pos, defs)).join("")}</div>`;
+    `<div class="grid" data-zone="${side}">${rowsFor(side).map((pos) => cellHtml(s, ui, side, pos, defs, previews)).join("")}</div>`;
 
   const inspectChar =
     ui.inspectUid !== null
@@ -372,12 +466,13 @@ export function renderBattle(
         ${(() => {
           const def = defs[inspectChar.defId]!;
           const lane = inspectChar.elevated ? "天空（高地转化）" : inspectChar.domain === "sky" ? "天空" : "地面";
-          return `<h3>${inspectChar.name} <small>${def.title}</small></h3>
-          <p>生命 ${inspectChar.hp}/${inspectChar.maxHp} · 攻击 ${inspectChar.atk} · 技能点 ${inspectChar.sp}/${inspectChar.spMax}</p>
+          const tier = def.tier ? ` · ${["一", "二", "三"][def.tier - 1]}级` : "";
+          return `<h3>${inspectChar.name} <small>${def.title}${tier}</small></h3>
+          <p>生命 ${inspectChar.hp}/${inspectChar.maxHp} · 攻击 ${inspectChar.atk} · 技能点 ${inspectChar.sp}/${inspectChar.spMax}${inspectChar.shield > 0 ? ` · 护盾 ${inspectChar.shield}` : ""}</p>
           <p>${lane}${s.players[inspectChar.owner].role === "attack" ? "进攻值 " : "防守值 "}${inspectChar.laneVal}${inspectChar.elevated ? "（计入天空防守）" : ""}</p>
           <p>被动 ✦ ${inspectChar.passiveText}</p>
           <p>大招 🌟 ${def.burst.name}：${def.burst.text}</p>
-          <p>${inspectChar.skillUsed ? "本回合已使用技能" : "本回合尚未使用技能"}${inspectChar.equipment ? " · 已装备 🛡 防御胸甲" : ""}</p>`;
+          <p>${inspectChar.attacked ? "本回合已普通攻击" : "本回合尚未普通攻击"}${inspectChar.equipment ? " · 已装备 🛡 防御胸甲" : ""}</p>`;
         })()}
       </div>`
     : "";
@@ -435,20 +530,20 @@ export function helpContent(): string {
     <h3>🎯 模式与胜利条件</h3>
     <p><b>单机防守战</b>：你执防守方，AI 执进攻方。<br><b>防守方（你）</b>：守住总生命（标准 10 / 艰难 15），完整撑过 10 / 15 个回合即获胜。<br><b>进攻方（AI）</b>：把你的总生命扣到 0。</p>
     <h3>🔄 回合流程</h3>
-    <p>每回合双方各获得 15 部署费用（可累计）。防守方（你）先行动，双方轮流：可先不限次使用道具牌，再选择其一——上阵角色 / 下阵角色（视为死亡进冷却，返还一半部署费）/ 使用角色技能 / 结束回合。双方都结束后结算：各抽 2 张道具牌 → 全场角色 +2 技能点 → 地形伤害 → 攻防比对。</p>
+    <p>每回合开始双方各获得 20 部署费用（可累计）。防守方先行动，双方轮流：行动方可<b>不限次数</b>使用道具牌，然后选择其一执行（执行后换对方行动）——上阵一个角色 / 下阵一个角色（视为死亡进冷却，返还一半部署费）/ 使用一个角色的<b>普通攻击</b>或<b>大招</b> / 结束回合。<br>普通攻击每位角色每回合只能使用一次；<b>大招不受次数限制</b>，只要技能点满且轮到我方行动就能释放。双方都结束后结算：各抽 2 张道具牌 → 全场角色 +2 技能点 → 地形伤害 → 攻防比对。</p>
     <h3>⚔ 攻防比对</h3>
-    <p>统计进攻方地面/天空进攻值与防守方地面/天空防守值。任一线<b>进攻 &gt; 防守</b>即被突破：扣除两线差值之和的总生命；两线都守住则无伤。</p>
+    <p>统计进攻方地面/天空进攻值与防守方地面/天空防守值。任一线<b>进攻 &gt; 防守</b>即被突破：扣除两线差值之和的总生命。暗影幽灵在场上时，天空防线被视为失守并额外扣除 1 点总生命。</p>
     <h3>🗺 站位</h3>
-    <p>每方 2×3 共 6 个区域，<b>每个区域只能放置一个角色</b>。防守方拥有 2 个高地（后排两角）与 4 个地面区域：天空角色可放任意区域；地面角色放地面区域提供地面防守，也可花<b>双倍部署费</b>上高地转为天空防守。进攻方无高地概念，部署永不翻倍。火山地形下双方后排中间为火山口（不可部署），其上/左/右区域的角色每回合结束受 6 点真实伤害。</p>
+    <p><b>防守方 2×3 共 6 格，进攻方 3×3 共 9 格</b>，每个区域只能放置一个角色。防守方拥有 2 个高地（后排两角）与 4 个地面区域：天空角色可放任意区域；地面角色放地面区域提供地面防守，也可花<b>双倍部署费</b>上高地转为天空防守。进攻方无高地概念，部署永不翻倍。火山地形下双方后排中间为火山口（不可部署），其上/左/右区域的角色每回合结束受 6 点真实伤害。</p>
     <h3>🧙 角色与阵营</h3>
-    <p>角色牌分阵营专属：<b>防守方角色牌</b>（玩家选 8 张）仅显示地面/天空<b>防守值</b>；<b>进攻方角色牌</b>（AI 随机 8 张）仅显示地面/天空<b>进攻值</b>。魔族军团已兵临城下！<br>共同属性：部署费、生命、攻击、技能点上限。<br>技能一（普通攻击）：按攻击力伤害敌方角色（治愈师被动改为治疗我方），不耗技能点。<br>技能二（大招）：技能点满才能释放，释放后清空。<br>被动：每角色一个，自动生效。</p>
+    <p>角色牌分阵营专属：<b>防守方角色牌</b>（玩家选 8 张）仅显示地面/天空<b>防守值</b>；<b>进攻方角色牌</b>（AI 随机 8 张）仅显示地面/天空<b>进攻值</b>，并分一级/二级/三级——<b>场上三级进攻方角色 ≤ 2，二级 ≤ 4，一级不限</b>。<br>共同属性：部署费、生命、攻击、技能点上限。<br>技能一（普通攻击）：按攻击力伤害敌方角色（疗养师被动改为治疗我方 8 点），不耗技能点。<br>技能二（大招）：技能点满才能释放，释放后清空，不限次数。<br>被动：每角色一个，自动生效。</p>
     <h3>⚡ 技能点</h3>
-    <p>每回合结束全场角色 +2；角色每攻击或治疗一次 +1。每回合每角色只能使用普攻或大招其一（刚上场的角色当回合也可用一次）。</p>
+    <p>每回合结束全场角色 +2；角色每攻击或治疗一次 +1。</p>
     <h3>☠ 死亡与冷却</h3>
-    <p>角色死亡后冷却 5 个完整回合回到手牌；再次上阵费用 = 原费用 ×(1 + 0.5×死亡次数)。</p>
+    <p>角色死亡后冷却 4 个完整回合回到手牌；再次上阵费用 = 原费用 ×(1 + 0.5×死亡次数)，<b>最高不超过原费用的两倍</b>。</p>
     <h3>🃏 道具牌</h3>
-    <p>公共牌库共 80 张，首回合各抽 5 张、每回合结束各抽 2 张。使用消耗部署费用，每回合不限次数；用后是否洗回依牌面说明。</p>
+    <p>公共牌库首回合各抽 5 张、每回合结束各抽 2 张。使用消耗部署费用，每回合不限次数；用后是否洗回依牌面说明。</p>
     <h3>💡 提示</h3>
-    <p>点击场上角色查看详情；点击我方角色打开行动菜单；点击手牌角色进入部署，点击手牌道具选择目标。真实伤害无视被动、减伤与装备。</p>
+    <p>点击场上角色查看详情；点击我方角色打开行动菜单；点击手牌角色进入部署，点击手牌道具选择目标。<b>指定攻击/治疗/大招/道具目标时，所有可选对象的血条会闪烁预演</b>即将发生的变化（含减伤结算后的真实损失）。真实伤害无视被动、减伤、装备与护盾。</p>
   </div>`;
 }

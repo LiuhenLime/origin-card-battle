@@ -26,7 +26,7 @@ export function opponent(side: Side): Side {
   return (1 - side) as Side;
 }
 
-/** 创建 FieldChar */
+/** 创建 FieldChar（复制被动数值参数，战斗层无需反查定义表） */
 function makeFieldChar(def: CharDef, uid: number, owner: Side, paidCost: number): FieldChar {
   return {
     uid,
@@ -44,9 +44,18 @@ function makeFieldChar(def: CharDef, uid: number, owner: Side, paidCost: number)
     elevated: false,
     equipment: null,
     paidCost,
-    skillUsed: false,
+    attacked: false,
     passive: def.passive,
     passiveText: def.passiveText,
+    shield: 0,
+    armorStacks: 0,
+    ghostVeil: false,
+    tempAtk: 0,
+    tempAtkTurns: 0,
+    endHeal: def.endHeal ?? 0,
+    enemyDeathHeal: def.enemyDeathHeal ?? 0,
+    cooldownDelta: def.cooldownDelta ?? 0,
+    noCostGrowth: def.noCostGrowth ?? false,
   };
 }
 
@@ -111,7 +120,7 @@ export function createGame(
 }
 
 /**
- * 回合结束结算：抽牌 → 技能点 → 被动回复 → 地形伤害 → 攻防比对 → 胜负 → 冷却 → 费用。
+ * 回合结束结算：抽牌 → 技能点 → 被动回复 → 地形伤害 → 攻防比对 → 胜负 → 冷却与限时增益 → 费用。
  * 结算完成后开启新一轮，防守方先行动。
  */
 export function endRoundSettlement(
@@ -132,10 +141,10 @@ export function endRoundSettlement(
     }
   }
 
-  // 3) 被动回合回复（骷髅弓手白骨）
+  // 3) 被动回合回复（骷髅射手 / 深渊海蛇）
   for (const side of [0, 1] as const) {
     for (const c of [...s.players[side].field]) {
-      if (c.passive === "bones" && c.hp > 0) healChar(s, c, 1);
+      if (c.passive === "bones" && c.hp > 0 && c.endHeal > 0) healChar(s, c, c.endHeal);
     }
   }
 
@@ -153,22 +162,28 @@ export function endRoundSettlement(
     }
   }
 
-  // 5) 攻防比对
+  // 5) 攻防比对（暗影幽灵在场时天空防线视为失守）
   const atkSide = (s.players[0].role === "attack" ? 0 : 1) as Side;
   const defSide = opponent(atkSide);
   const atkT = laneTotals(s, atkSide);
   const defT = laneTotals(s, defSide);
-  const breach = atkT.ground > defT.ground || atkT.sky > defT.sky;
+  const ghostBreach = s.players[atkSide].field.some((c) => c.passive === "nightmare" && c.hp > 0);
+  const breach = atkT.ground > defT.ground || atkT.sky > defT.sky || ghostBreach;
   const groundDiff = Math.max(0, atkT.ground - defT.ground);
   const skyDiff = Math.max(0, atkT.sky - defT.sky);
-  const total = groundDiff + skyDiff;
-  s.events.push({ t: "settlement", round, groundDiff, skyDiff, breach });
+  const total = groundDiff + skyDiff + (ghostBreach ? 1 : 0);
+  s.events.push({ t: "settlement", round, groundDiff, skyDiff, breach, ghostBreach });
   const defender = s.players[defSide];
   if (breach) {
     defender.totalHp -= total;
-    s.log.push(`⚔ 防线被突破！地面差 ${groundDiff} + 天空差 ${skyDiff}，${defender.name} 总生命 -${total}（${Math.max(0, defender.totalHp)}/${defender.totalHpMax}）`);
+    s.log.push(
+      `⚔ 防线被突破！地面差 ${groundDiff} + 天空差 ${skyDiff}${ghostBreach ? " + 幽灵 1" : ""}，${defender.name} 总生命 -${total}（${Math.max(0, defender.totalHp)}/${defender.totalHpMax}）`,
+    );
   } else {
     s.log.push(`🛡 防守成功！地面 ${defT.ground}≥${atkT.ground}，天空 ${defT.sky}≥${atkT.sky}`);
+  }
+  if (ghostBreach) {
+    s.log.push(`👻 暗影幽灵仍在场上游荡，天空防线被视作失守，额外扣除 1 点总生命`);
   }
 
   // 6) 胜负判定
@@ -178,12 +193,22 @@ export function endRoundSettlement(
     s.winner = { side: "defense", reason: `防守方完整守住了 ${DIFFICULTY[s.difficulty].rounds} 个回合` };
   }
 
-  // 7) 冷却递减（死亡当次结算也计入）
+  // 7) 冷却递减（死亡当次结算也计入）与限时增益递减
   for (const side of [0, 1] as const) {
     for (const h of s.players[side].handChars) {
       if (h.cooldown > 0) {
         h.cooldown -= 1;
         if (h.cooldown === 0) s.log.push(`⏳ 「${charDefs[h.defId]?.name ?? h.defId}」冷却结束，可以再次上场`);
+      }
+    }
+    for (const c of s.players[side].field) {
+      if (c.tempAtkTurns > 0) {
+        c.tempAtkTurns -= 1;
+        if (c.tempAtkTurns === 0 && c.tempAtk > 0) {
+          c.atk = Math.max(0, c.atk - c.tempAtk);
+          s.log.push(`⌛ 「${c.name}」的突袭加成结束了（攻击力 -${c.tempAtk}）`);
+          c.tempAtk = 0;
+        }
       }
     }
   }
@@ -192,7 +217,7 @@ export function endRoundSettlement(
   for (const side of [0, 1] as const) {
     const p = s.players[side];
     p.cost += COST_PER_ROUND;
-    for (const c of p.field) c.skillUsed = false;
+    for (const c of p.field) c.attacked = false;
   }
   s.passed = [false, false];
   if (!s.winner) {

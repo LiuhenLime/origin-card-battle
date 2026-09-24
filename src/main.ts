@@ -4,7 +4,7 @@ import rawChars from "../data/characters.json";
 import rawItems from "../data/items.json";
 import type { CharDef, GameState, ItemDef, Side, CellPos } from "./engine/types";
 import { createGame } from "./engine/state";
-import { deployChar, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./engine/actions";
+import { deployChar, deployCostOf, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./engine/actions";
 import { applyAiStep } from "./engine/ai";
 import {
   emptyFx,
@@ -160,7 +160,12 @@ async function drainEvents(): Promise<void> {
         floatAtSel(`[data-uid="${ev.uid}"]`, "🌋-6", "volcano");
         break;
       case "settlement":
-        if (ev.breach) floatAtSel(`[data-totalhp="${breachSide}"]`, `-${ev.groundDiff + ev.skyDiff}`, "settle");
+        if (ev.breach) {
+          floatAtSel(`[data-totalhp="${breachSide}"]`, `-${ev.groundDiff + ev.skyDiff}`, "settle");
+          if (ev.ghostBreach) {
+            floatAtSel(`[data-totalhp="${breachSide}"]`, "👻-1", "pure");
+          }
+        }
         else floatAtSel(`[data-totalhp="${state.players[0].role === "defense" ? 0 : 1}"]`, "守住", "heal");
         break;
       default:
@@ -326,8 +331,8 @@ app.addEventListener("click", (ev) => {
       const c = state.players[viewer].field.find((x) => x.uid === uid);
       const def = c ? charDefs[c.defId] : undefined;
       if (!c || !def) return;
-      if (c.sp < c.spMax || c.skillUsed) {
-        toast(c.skillUsed ? "该角色本回合已使用过技能" : "技能点不足");
+      if (c.sp < c.spMax) {
+        toast(`技能点不足（${c.sp}/${c.spMax}）`);
         return;
       }
       if (def.burst.target === "one_enemy") {
@@ -424,7 +429,7 @@ app.addEventListener("click", (ev) => {
       return;
     }
     const def = charDefs[h.defId]!;
-    const cost = Math.floor(def.cost * (1 + 0.5 * h.deathCount));
+    const cost = deployCostOf(def, h.deathCount, false);
     if (cost > state.players[viewer].cost) {
       toast(`部署费用不足（需 ${cost}）`);
       return;

@@ -17,26 +17,34 @@ export const DIFFICULTY: Record<Difficulty, { hp: number; rounds: number }> = {
 export type Domain = "ground" | "sky";
 
 /** 每回合双方各获得的部署费用 */
-export const COST_PER_ROUND = 15;
+export const COST_PER_ROUND = 20;
 
 /** 角色死亡后的冷却回合数 */
-export const DEATH_COOLDOWN = 5;
+export const DEATH_COOLDOWN = 4;
 
-/** 站位：每方 2×3。row 0 = 后排（防守方为高地），row 1 = 前排（防守方为地面） */
+/** 站位。row 0 = 后排（防守方为高地），大 row = 前排（靠近中线） */
 export interface CellPos {
-  row: 0 | 1;
+  row: 0 | 1 | 2;
   col: 0 | 1 | 2;
 }
-export const CELL_ROWS = 2;
-export const CELL_COLS = 3;
+
+/** 双方区域尺寸：防守方 2×3（6 格），进攻方 3×3（9 格） */
+export function gridRows(role: Role): number {
+  return role === "attack" ? 3 : 2;
+}
+
+/** 位置是否在该方场地内 */
+export function isValidCell(role: Role, pos: CellPos): boolean {
+  return pos.row >= 0 && pos.row < gridRows(role) && pos.col >= 0 && pos.col <= 2;
+}
 
 export type Terrain = "plain" | "volcano";
 /** 火山口固定替换双方后排中间格，其上/左/右区域回合结束受 6 点真实伤害 */
 export const VOLCANO_DAMAGE = 6;
-export function volcanoCell(side: Side): CellPos {
+export function volcanoCell(_side: Side): CellPos {
   return { row: 0, col: 1 };
 }
-export function volcanoBlastCells(side: Side): CellPos[] {
+export function volcanoBlastCells(_side: Side): CellPos[] {
   return [
     { row: 1, col: 1 }, // 上
     { row: 0, col: 0 }, // 左
@@ -58,32 +66,46 @@ export interface CharDef {
   faction: "defense" | "attack";
   /** 领域数值：防守方牌为防守值，进攻方牌为进攻值 */
   laneVal: number;
+  /** 进攻方角色稀有层级：1/2/3。场上同层级数量受上限约束（3 级 ≤2，2 级 ≤4） */
+  tier?: 1 | 2 | 3;
   /** 大招：技能点满后可释放，释放后清空 */
   burst: BurstDef;
-  /** 大招附加：释放后治疗自身（影刺客） */
+  /** 大招附加：释放后治疗自身（深渊海蛇） */
   selfHeal?: number;
   /** 被动效果描述与标识 */
   passive: PassiveId;
   passiveText: string;
   /** 初始技能点（默认 0） */
   initSp?: number;
+  /** 每回合结束被动回复生命量（bones 被动，默认 0） */
+  endHeal?: number;
+  /** 每当有敌人死亡时回复的生命量（bloodthirst 被动，默认 0） */
+  enemyDeathHeal?: number;
+  /** 死亡冷却回合修正（自爆小车 -2） */
+  cooldownDelta?: number;
+  /** true = 再次上阵费用不随死亡次数增长（自爆小车） */
+  noCostGrowth?: boolean;
   text: string;
 }
 
 export type PassiveId =
   | "none"
-  | "tough_skin" // 受到的普通攻击伤害 -1
-  | "pack_tactics" // 己方场上同名角色 >1 时攻击 +2
-  | "archmage" // 普通攻击造成真实伤害
-  | "healer" // 普通攻击改为治疗我方，初始技能点 2
-  | "stone_wing" // 不受火山伤害
-  | "bloodthirst" // 击杀敌人后回复 3 点生命
-  | "bones" // 每回合结束回复 1 点生命
-  | "spikes" // 受到的技能伤害 -1
-  | "shell" // 受到的非真实伤害 -2
-  | "ambush" // 攻击生命值低于自己的敌人时伤害 +2
-  | "execute" // 攻击生命值过半的敌人时伤害 +2
-  | "wraith"; // 受到的非真实伤害 -1
+  | "tough_skin" // 皮糙肉厚：受到的非真实伤害 -1
+  | "die_blast" // 自爆小车亡语：死亡时对随机敌方单位造成 8 点非真实伤害
+  | "support" // 我来支援：释放大招后抽 3 张牌
+  | "healer" // 疗养师：普攻治疗我方 8 点；使用普攻/大招时随机对敌方一名角色 4 点真实伤害
+  | "stone_wing" // 飞行：不受场地（火山）伤害
+  | "bloodthirst" // 嗜血：每当有敌人死亡时回复生命
+  | "bones" // 每回合结束回复生命（量见 endHeal）
+  | "thorns" // 尖鳞：受到普通攻击或大招伤害时对来源造成 5 点真实伤害
+  | "shell" // 龙鳞：受到的非真实伤害 -2
+  | "taunt" // 你过来呀：优先被敌方攻击
+  | "stealth" // 隐匿：场上有其他我方角色时，敌人优先攻击其他角色
+  | "pack_tactics" // 群聚：己方场上同名角色 >1 时攻击 +2
+  | "magic_armor" // 魔铠：每受到一次非真实伤害，其后受到的非真实伤害 -1（死亡重置）
+  | "triple_head" // 我有三个头：普攻连续造成三次非真实伤害（每次至少 1）
+  | "curse" // 暗蚀：普攻使目标生命值上限 -1（持续到目标死亡）
+  | "nightmare"; // 暗影幽灵：回合结束时若仍在场上，天空防线视为失守并额外扣 1 点总生命
 
 export type BurstTarget = "all_enemies" | "all_allies" | "one_enemy" | "self" | "none";
 
@@ -95,12 +117,24 @@ export interface BurstDef {
   value?: number;
   /** true = 真实伤害 */
   pure?: boolean;
-  /** 哥布林成群：将一张同名角色牌加入手牌 */
-  addCopyToHand?: boolean;
   /** 永久攻击力加成（狂暴） */
   atkBuff?: number;
-  /** 永久领域防守值加成（岩翼） */
+  /** 永久领域防守值加成（变硬） */
   defBuff?: number;
+  /** 护盾：吸收真实与非真实伤害（龟甲护体） */
+  shield?: number;
+  /** 限时攻击力加成（突袭） */
+  tempAtk?: { value: number; turns: number };
+  /** 额外治疗血量百分比最低的我方角色（治治你的） */
+  extraLowestHeal?: number;
+  /** 所有敌方角色受伤后，削减敌方攻击力最高者的攻击力（魔军冲锋） */
+  weakenTopAtk?: number;
+  /** 化为虚体：受到的非真实伤害 -1，持续到死亡（虚体大招） */
+  ghostVeil?: boolean;
+  /** 立即死亡（自爆，触发亡语） */
+  selfKill?: boolean;
+  /** 召唤一个随机一级进攻方角色到己方随机空位（深渊召唤） */
+  summonTier1?: boolean;
   text: string;
 }
 
@@ -111,7 +145,7 @@ export type ItemEffect =
   | { kind: "damage"; value: number; pure?: boolean } // 对一名敌方角色
   | { kind: "equip_armor" } // 受到的非真实伤害 -1
   | { kind: "atk_buff"; value: number } // 攻击力 +n（本场）
-  | { kind: "def_buff"; value: number } // 领域防守值 +n（本场）
+  | { kind: "def_buff"; value: number } // 领域防守/进攻值 +n（本场）
   | { kind: "draw"; value: number }
   | { kind: "move" } // 移动一名己方角色到任意合法空格
   | { kind: "weaken"; value: number }; // 敌方角色攻击 -n（最低 0）
@@ -123,7 +157,7 @@ export interface ItemDef {
   id: string;
   name: string;
   cost: number; // 消耗部署费用
-  /** 需要目标：己方角色 / 敌方角色 / 己方角色(可移动) */
+  /** 需要目标：己方角色 / 敌方角色 / 无 */
   target: "own_char" | "enemy_char" | "none";
   effects: ItemEffect[];
   recycle: Recycle;
@@ -132,6 +166,9 @@ export interface ItemDef {
 }
 
 // ---------- 运行时 ----------
+
+/** 伤害来源类型（决定尖鳞反伤等被动是否触发） */
+export type DamageSource = "attack" | "burst" | "item" | "terrain" | "thorns" | "passive";
 
 /** 场上角色 */
 export interface FieldChar {
@@ -153,10 +190,24 @@ export interface FieldChar {
   equipment: string | null; // 装备的道具牌 id
   /** 实际支付过的部署费用（下阵时返还一半，向下取整） */
   paidCost: number;
-  /** 本回合是否已使用技能（普攻或大招二选一） */
-  skillUsed: boolean;
+  /** 本回合是否已普通攻击（大招不受此限制） */
+  attacked: boolean;
   passive: PassiveId;
   passiveText: string;
+  /** 护盾值（吸收真实与非真实伤害） */
+  shield: number;
+  /** 魔铠叠加层数（每受一次非真实伤害 +1，死亡重置） */
+  armorStacks: number;
+  /** 虚体：受到的非真实伤害 -1 */
+  ghostVeil: boolean;
+  /** 限时攻击力加成（突袭） */
+  tempAtk: number;
+  tempAtkTurns: number;
+  /** 从静态定义复制的被动参数（避免战斗层反查定义表） */
+  endHeal: number;
+  enemyDeathHeal: number;
+  cooldownDelta: number;
+  noCostGrowth: boolean;
 }
 
 /** 手牌中的角色牌（待部署或冷却中） */
@@ -197,7 +248,7 @@ export type GameEvent =
   | { t: "sp"; side: Side; uid: number; amount: number }
   | { t: "item"; side: Side; itemId: string }
   | { t: "move"; side: Side; uid: number; to: CellPos }
-  | { t: "settlement"; round: number; groundDiff: number; skyDiff: number; breach: boolean }
+  | { t: "settlement"; round: number; groundDiff: number; skyDiff: number; breach: boolean; ghostBreach?: boolean }
   | { t: "volcano"; side: Side; uid: number }
   | { t: "round"; n: number };
 

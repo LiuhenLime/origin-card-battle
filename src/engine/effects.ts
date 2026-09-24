@@ -36,7 +36,7 @@ export function applyItemEffects(
       }
       case "damage": {
         if (!target) return "需要目标";
-        damageChar(s, target, e.value, { pure: e.pure, source: "skill" });
+        damageChar(s, target, e.value, { pure: e.pure, source: "item" });
         break;
       }
       case "equip_armor": {
