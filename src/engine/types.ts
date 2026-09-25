@@ -26,9 +26,9 @@ export function roundIncome(role: Role, round: number): number {
   if (role === "defense") return COST_PER_ROUND;
   if (round <= 5) return 20;
   if (round <= 7) return 30;
-  if (round === 8) return 40;
-  if (round === 9) return 45;
-  return 50;
+  if (round === 8) return 100;
+  if (round === 9) return 150;
+  return 200;
 }
 
 /** 回收一张手牌道具洗回牌库时立即获得的部署费用 */
