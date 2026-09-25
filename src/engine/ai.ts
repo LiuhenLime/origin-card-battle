@@ -1,15 +1,15 @@
 // 贪心 AI（进攻方，恒为 side 1）：道具不换手、主要行动换手由引擎保证。
 // 目标选择尊重嘲讽/隐匿被动，并在合法候选中随机变化，避免每回合追打同一个人。
 import type { CellPos, CharDef, CharRef, FieldChar, GameState, ItemDef, ItemEffect } from "./types";
-import { isValidCell, volcanoBlastCells } from "./types";
+import { canChainDeploy, volcanoBlastCells } from "./types";
 import { computeDamage, effectiveAtk, targetCandidates } from "./combat";
-import { deployChar, deployCostOf, emptyCells, isCellOccupied, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./actions";
+import { TIER_CAPS, deployChar, deployCostOf, emptyCells, playItem, passAction, undeployChar, useBurst, useNormalAttack } from "./actions";
 
 const AI_SIDE = 1 as const;
 
 /** AI 每个行动回合最多使用的道具牌数（道具不换手，无上限会无限刷增益道具） */
 const AI_ITEM_BUDGET = 2;
-/** AI 每回合最多部署次数 */
+/** AI 每回合最多部署次数（仅第 8 回合前的限制；第 8 回合起连续部署不限次数） */
 const AI_DEPLOY_BUDGET = 3;
 let aiStateRef: GameState | null = null;
 let aiItemsUsed = 0;
@@ -33,42 +33,28 @@ function isBlasted(s: GameState, side: 0 | 1, pos: CellPos): boolean {
   return cells.some((b) => b.row === pos.row && b.col === pos.col);
 }
 
-/** 进攻方 3×3 的全部格子 */
-function allCells(): CellPos[] {
-  const out: CellPos[] = [];
-  for (let row = 0; row < 3; row++) {
-    for (let col = 0; col < 3; col++) {
-      out.push({ row: row as 0 | 1 | 2, col: col as 0 | 1 | 2 });
-    }
-  }
-  return out;
-}
-
-/** 挑一个可部署的空格：优先前排展开、避开火山带 */
+/** 挑一个可部署的空格：优先前排展开、避开火山带（火山口已由 emptyCells 排除） */
 function pickCell(s: GameState): CellPos | null {
-  const preferred: CellPos[] = [
+  const preference: CellPos[] = [
     { row: 2, col: 0 },
     { row: 2, col: 2 },
     { row: 2, col: 1 },
     { row: 1, col: 0 },
     { row: 1, col: 2 },
-  ];
-  const risky: CellPos[] = [
-    { row: 1, col: 1 },
     { row: 0, col: 0 },
     { row: 0, col: 2 },
+    { row: 1, col: 1 },
+    { row: 0, col: 1 },
   ];
-  for (const pos of preferred) {
-    if (!isBlasted(s, AI_SIDE, pos) && isCellFree(s, pos)) return pos;
-  }
-  for (const pos of [...preferred, ...risky]) {
-    if (isCellFree(s, pos)) return pos; // 全是火山带也只好硬上
+  const free = new Set(emptyCells(s, AI_SIDE).map((p) => `${p.row},${p.col}`));
+  for (const avoidBlast of [true, false] as const) {
+    for (const pos of preference) {
+      if (!free.has(`${pos.row},${pos.col}`)) continue;
+      if (avoidBlast && isBlasted(s, AI_SIDE, pos)) continue;
+      return pos;
+    }
   }
   return null; // 没有空格了
-}
-
-function isCellFree(s: GameState, pos: CellPos): boolean {
-  return isValidCell(s.players[AI_SIDE].role, pos) && !isCellOccupied(s, AI_SIDE, pos);
 }
 
 /** 在候选中随机挑选，并尽量避开上一次攻击的目标 */
@@ -95,7 +81,7 @@ function pickAttackTarget(
   return chosen;
 }
 
-/** 可部署的手牌角色（冷却完毕且付得起） */
+/** 可部署的手牌角色（冷却完毕、付得起且不触碰场上层级上限） */
 function deployable(s: GameState, charDefs: Record<string, CharDef>) {
   const p = s.players[AI_SIDE];
   const out: { uid: number; def: CharDef; cost: number }[] = [];
@@ -103,15 +89,44 @@ function deployable(s: GameState, charDefs: Record<string, CharDef>) {
     if (h.cooldown > 0) continue;
     const def = charDefs[h.defId];
     if (!def) continue;
+    if (!tierCapOK(s, def, charDefs)) continue;
     const cost = deployCostOf(def, h.deathCount, false);
     if (p.cost >= cost) out.push({ uid: h.uid, def, cost });
   }
   return out;
 }
 
+/** 场上层级数量上限：3 级 ≤ 2，2 级 ≤ 4，1 级无限制。部署前必须校验，否则 deployChar 会静默失败 */
+function tierCapOK(s: GameState, def: CharDef, charDefs: Record<string, CharDef>): boolean {
+  if (!def.tier) return true;
+  const cap = TIER_CAPS[def.tier];
+  if (!cap) return true;
+  const count = s.players[AI_SIDE].field.filter((c) => charDefs[c.defId]?.tier === def.tier).length;
+  return count < cap;
+}
+
 /** 部署候选按“性价比”排序：进攻价值 ÷ 费用 */
 function deployScore(def: CharDef): number {
   return (def.laneVal * 2 + def.atk / 2) / Math.max(1, def.cost);
+}
+
+/** 手牌单位的满血压制价值：线上压制 + 输出（换阵评估用） */
+function freshValue(def: CharDef): number {
+  let v = def.laneVal * 2 + def.atk / 2;
+  if (def.passive === "nightmare") v += 3; // 暗影幽灵：天空防线视作失守，每回合稳定 1 点总生命
+  return v;
+}
+
+/** 场上单位的当前压制价值：残血打折，本回合未攻击且有目标再计一次攻击机会 */
+function fieldUnitValue(
+  s: GameState,
+  c: FieldChar,
+  charDefs: Record<string, CharDef>,
+): number {
+  const def = charDefs[c.defId];
+  let v = def ? freshValue(def) : 0;
+  if (!c.attacked && targetCandidates(s, (1 - c.owner) as 0 | 1).length > 0) v += 1.5;
+  return v * (0.5 + 0.5 * (c.hp / c.maxHp));
 }
 
 /** 大招的粗略价值（用于排序释放顺序） */
@@ -239,15 +254,35 @@ export function aiNextAction(
     if (victim) return { kind: "attack", uid: attacker.uid, target: { side: foeSide, uid: victim.uid } };
   }
 
-  // 5. 补充进攻力量（受每回合部署预算限制）
-  if (aiDeploysUsed < AI_DEPLOY_BUDGET) {
+  // 5. 补充进攻力量：第 8 回合起连续部署不限次数（钱多、冷却清零的角色都在手上），
+  //    此时按绝对压制价值选人；前中期费用紧张，仍按性价比排序并受每回合预算限制
+  const chain = canChainDeploy(me.role, s.round);
+  if (chain || aiDeploysUsed < AI_DEPLOY_BUDGET) {
     const pos = pickCell(s);
-    const options = pos
-      ? deployable(s, charDefs).sort((a, b) => deployScore(b.def) - deployScore(a.def))
-      : [];
+    const options = deployable(s, charDefs).sort((a, b) =>
+      chain ? freshValue(b.def) - freshValue(a.def) : deployScore(b.def) - deployScore(a.def),
+    );
     if (pos && options[0]) {
       aiDeploysUsed += 1;
       return { kind: "deploy", handUid: options[0].uid, pos };
+    }
+  }
+
+  // 6. 第 8 回合起场地已满：下阵价值最低的场上单位腾出空位，下一轮会立刻把更强的手牌生力军
+  //    部署进空位——把囤积的大额部署费用持续转化为线上压制，而不是白白宣告结束回合
+  if (chain) {
+    const worst = [...me.field].sort((a, b) => fieldUnitValue(s, a, charDefs) - fieldUnitValue(s, b, charDefs))[0];
+    if (worst) {
+      const refund = Math.floor(worst.paidCost / 2);
+      const upgrade = me.handChars
+        .filter((h) => h.cooldown === 0)
+        .map((h) => ({ h, def: charDefs[h.defId] }))
+        .filter((x): x is { h: (typeof me.handChars)[number]; def: CharDef } => !!x.def)
+        .filter((x) => tierCapOK(s, x.def, charDefs))
+        .filter((x) => freshValue(x.def) >= fieldUnitValue(s, worst, charDefs) + 2)
+        .filter((x) => me.cost + refund >= deployCostOf(x.def, x.h.deathCount, false))
+        .sort((a, b) => freshValue(b.def) - freshValue(a.def))[0];
+      if (upgrade) return { kind: "undeploy", uid: worst.uid };
     }
   }
 

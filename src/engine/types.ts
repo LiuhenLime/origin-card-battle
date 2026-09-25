@@ -19,7 +19,7 @@ export const COST_PER_ROUND = 20;
 
 /**
  * 回合开始时某方获得的部署费用：
- * 进攻方按回合递增——第 1-5 回合 20、第 6-7 回合 30、第 8 回合 40、第 9 回合 45、第 10 回合起 50；
+ * 进攻方按回合递增——第 1-5 回合 20、第 6-7 回合 30、第 8 回合 100、第 9 回合 150、第 10 回合 200；
  * 防守方恒为 COST_PER_ROUND。
  */
 export function roundIncome(role: Role, round: number): number {
